@@ -792,6 +792,10 @@ const recieveMessagesV2 = async (req, res)=>{
       message = messageObject.data.data.messages?.[0]?.message?.extendedTextMessage?.text || messageObject.data.data.messages?.[0]?.message?.conversation || '';
       let remoteId = messageObject.data.data.messages?.[0]?.key.remoteJid.split('@')[0];
 
+      if(remoteId.length>13){
+        return res.send('invalid number')
+      }
+
       let start = new Date();
       start.setHours(0,0,0,0);
 
@@ -978,7 +982,7 @@ const recieveMessagesV2 = async (req, res)=>{
         }
 
         previousChatLog['messageTrack']=2;
-        previousChatLog['finalResponse']=message;
+        previousChatLog['finalResponse']=message.toLowerCase();
         await previousChatLog.save()
         let reply = campaign?.messageForRejection
         const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
@@ -988,7 +992,7 @@ const recieveMessagesV2 = async (req, res)=>{
       if(campaign?.verifyNumberFirst){
         const contact = await Contact.findOne({number: remoteId})
         if(previousChatLog?.messageTrack===2){
-          if(message===contact.invites || (!isNaN(message) && +message < contact.invites)){
+          if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites)){
             previousChatLog.messageTrack = 3;
             previousChatLog.finalResponse=message;
             // console.log('previousChatLog',previousChatLog);
