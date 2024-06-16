@@ -478,6 +478,10 @@ const recieveMessages = async (req, res)=>{
       message = messageObject.data.data.messages?.[0]?.message?.extendedTextMessage?.text || messageObject.data.data.messages?.[0]?.message?.conversation || '';
       let remoteId = messageObject.data.data.messages?.[0]?.key.remoteJid.split('@')[0];
 
+      if(remoteId.length>13){
+        return res.send('invalid number')
+      }
+
       let file = messageObject.data.data.messages[0].message?.imageMessage || messageObject.data.data.messages[0].message?.documentMessage || messageObject.data.data.messages[0].message?.audioMessage
 
       if(file){
