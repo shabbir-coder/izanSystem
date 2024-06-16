@@ -961,6 +961,15 @@ const recieveMessagesV2 = async (req, res)=>{
             reply = campaign?.messageForMoreThanOneInvites
             const response = await sendMessageFunc({...sendMessageObj,message: reply });
             return res.send('More Invites')
+          }else{
+            let reply = campaign?.thankYouText
+            if(campaign?.thankYouMedia){              
+              sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
+              sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
+              sendMessageObj.type = 'media';
+            }
+          const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
+          return res.send('thank you send')
           }
         }else{
           let reply = campaign?.thankYouText
