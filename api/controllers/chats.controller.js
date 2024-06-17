@@ -196,7 +196,7 @@ const sendBulkMessage = async (req, res)=>{
             new: true // Return the modified document rather than the original
           }
         )
-        await new Promise(resolve => setTimeout(resolve, 8000));
+        await new Promise(resolve => setTimeout(resolve, 7500));
       }
     }
 
@@ -921,8 +921,7 @@ const recieveMessagesV2 = async (req, res)=>{
       const previousChatLog = await ChatLogs.findOne(
         {
           senderNumber: remoteId,
-          instanceId: messageObject?.instance_id,
-          updatedAt: { $gte: start, $lt: end }
+          instanceId: messageObject?.instance_id
         },
       ).sort({ updatedAt: -1 });
 
@@ -1025,7 +1024,6 @@ const recieveMessagesV2 = async (req, res)=>{
         return res.send(true);
       }
       
-      
       if(message.toLowerCase()===campaign?.StatsKeyword && senderId?.isAdmin){
         if(!senderId?.isAdmin){
           const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
@@ -1092,7 +1090,7 @@ const recieveMessagesV2 = async (req, res)=>{
       console.log({campaign})
       if(/yes/i.test(message)){
         if( previousChatLog?.finalResponse){
-          const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to change`
+          const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to edit your choice`
           const response = await sendMessageFunc({...sendMessageObj,message: reply });
           return res.send('Type Change First')
         }
@@ -1114,6 +1112,11 @@ const recieveMessagesV2 = async (req, res)=>{
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
               sendMessageObj.type = 'media';
             }
+            previousChatLog.messageTrack = 3;
+            previousChatLog.finalResponse = message;
+            previousChatLog.updatedAt= Date.now(),
+            // console.log('previousChatLog',previousChatLog);
+            await previousChatLog.save(); 
           const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
           return res.send('thank you send')
           }
@@ -1124,6 +1127,11 @@ const recieveMessagesV2 = async (req, res)=>{
             sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
             sendMessageObj.type = 'media';
           }
+          previousChatLog.messageTrack = 3;
+          previousChatLog.finalResponse = message;
+          previousChatLog.updatedAt= Date.now(),
+          // console.log('previousChatLog',previousChatLog);
+          await previousChatLog.save()
           const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
           return res.send('thank you send')
         }
@@ -1131,12 +1139,12 @@ const recieveMessagesV2 = async (req, res)=>{
 
       if(/no/i.test(message)){
         if( previousChatLog?.finalResponse){
-          const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to change`
+          const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to edit your choice`
           const response = await sendMessageFunc({...sendMessageObj,message: reply });
           return res.send('Type Change First')
         }
 
-        previousChatLog['messageTrack']=2;
+        previousChatLog['messageTrack']=3;
         previousChatLog['finalResponse']=message.toLowerCase();
         await previousChatLog.save()
         let reply = campaign?.messageForRejection
@@ -1150,6 +1158,7 @@ const recieveMessagesV2 = async (req, res)=>{
           if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites || 5)){
             previousChatLog.messageTrack = 3;
             previousChatLog.finalResponse=message;
+            previousChatLog.updatedAt=Date.now();
             // console.log('previousChatLog',previousChatLog);
             await previousChatLog.save(); 
             let reply = campaign?.thankYouText
@@ -1158,6 +1167,7 @@ const recieveMessagesV2 = async (req, res)=>{
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
               sendMessageObj.type = 'media';
             }
+
             const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
             return res.send('thank you send')
           }else{
