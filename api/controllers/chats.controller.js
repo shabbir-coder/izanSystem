@@ -196,6 +196,7 @@ const sendBulkMessage = async (req, res)=>{
             new: true // Return the modified document rather than the original
           }
         )
+        await new Promise(resolve => setTimeout(resolve, 8000));
       }
     }
 
@@ -899,6 +900,7 @@ const recieveMessagesV2 = async (req, res)=>{
       end.setHours(23,59,59,999);
 
       const recieverId = await Instance.findOne({instance_id: messageObject.instance_id})
+      const senderId = await Contact.findOne({number: remoteId})
 
       const newMessage = {
         recieverId : recieverId?._id,
@@ -936,8 +938,8 @@ const recieveMessagesV2 = async (req, res)=>{
             contact = await Contact.findOne({number: remoteId})
             console.log({contact})
             if(!contact) {
-              reply = campaign.numberVerificationFails;
-              const response = await sendMessageFunc({...sendMessageObj,message: reply });
+              // reply = campaign.numberVerificationFails;
+              // const response = await sendMessageFunc({...sendMessageObj,message: reply });
               return res.send('Account not found')
             }
           }
@@ -991,6 +993,59 @@ const recieveMessagesV2 = async (req, res)=>{
 
       const campaign = await Event.findOne({_id: previousChatLog?.eventId})
       
+      if(campaign?.RewriteKeyword?.toLowerCase() === message?.toLowerCase()){
+        if(!previousChatLog || previousChatLog.messageTrack===1){
+          const response =  await sendMessageFunc({...sendMessageObj,message: 'Nothing to cancel' });
+          return res.send(true);
+        }
+        previousChatLog['messageTrack']=1
+        previousChatLog['finalResponse']=''
+        await previousChatLog.save()
+        let reply = campaign?.invitationText
+          if(campaign?.invitationMedia){              
+            sendMessageObj.filename = campaign?.invitationMedia.split('/').pop();
+            sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.invitationMedia;
+            sendMessageObj.type = 'media';
+          }
+        const response =  await sendMessageFunc({...sendMessageObj,message: reply });
+        return res.send('after change message')
+      }
+
+      if(message.toLowerCase()===campaign?.ReportKeyword && senderId?.isAdmin){
+        if(!senderId?.isAdmin){
+          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
+          return res.send(true);
+        }
+        const fileName = await getReportdataByTime(start,end, recieverId?._id)
+        // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
+        sendMessageObj.filename = fileName.split('/').pop();
+        sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
+        sendMessageObj.type = 'media';
+        const response =  await sendMessageFunc({...sendMessageObj, message:'Download report'});
+        return res.send(true);
+      }
+      
+      
+      if(message.toLowerCase()===campaign?.StatsKeyword && senderId?.isAdmin){
+        if(!senderId?.isAdmin){
+          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
+          return res.send(true);
+        }
+
+        const replyObj = await getStats1(recieverId,'','');
+
+        let replyMessage = '*Statistics*';
+        replyMessage += '\n\n';
+        replyMessage += `\n● Total nos of Invitees *${replyObj?.totalContacts}*`;
+        replyMessage += `\n● Yes *${replyObj?.yes}*`;
+        replyMessage += `\n● No *${replyObj?.no}*`;
+        replyMessage += `\n● Balance *${replyObj?.balance}*`;
+        
+        const response = await sendMessageFunc({...sendMessageObj, message: replyMessage});
+        return res.send(true);
+      }
+
+
       if(campaign.startingKeyword.toLowerCase() === message.toLowerCase()){
         const currentTime = moment();
         
@@ -1035,7 +1090,7 @@ const recieveMessagesV2 = async (req, res)=>{
       }
       
       console.log({campaign})
-      if(message.toLowerCase() === 'yes'){
+      if(/yes/i.test(message)){
         if( previousChatLog?.finalResponse){
           const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to change`
           const response = await sendMessageFunc({...sendMessageObj,message: reply });
@@ -1074,7 +1129,7 @@ const recieveMessagesV2 = async (req, res)=>{
         }
       }
 
-      if(message.toLowerCase() === 'no'){
+      if(/no/i.test(message)){
         if( previousChatLog?.finalResponse){
           const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to change`
           const response = await sendMessageFunc({...sendMessageObj,message: reply });
@@ -1346,30 +1401,33 @@ const formatDate = (date) => {
   }
 };
 
-async function getReportdataByTime(startDate, endDate, id){
 
+async function getReportdataByTime(startDate, endDate, id) {
   let dateFilter = {};
-  if (startDate && endDate) { // If both startDate and endDate are defined, add a date range filter
+  if (startDate && endDate) {
     dateFilter = {
       "updatedAt": {
-        $gte: startDate,
-        $lt: endDate
+        $gte: new Date(startDate),
+        $lt: new Date(endDate)
       }
     };
   }
 
+  console.log('instance', id)
   let query = [
+    {
+      $match: { instanceId: id.toString() }
+    },
     {
       $lookup: {
         from: 'chatlogs',
-        let: { contactITS: '$ITS' },
+        let: { contactNumber: '$number' },
         pipeline: [
           {
             $match: {
               $expr: {
                 $and: [
-                  { $eq: ['$requestedITS', '$$contactITS'] },
-                  { $eq: ['$instance_id', id] },
+                  { $eq: ['$senderNumber', '$$contactNumber'] },
                 ]
               }
             }
@@ -1381,66 +1439,67 @@ async function getReportdataByTime(startDate, endDate, id){
     { $unwind: { path: '$chatlog', preserveNullAndEmptyArrays: true } },
     {
       $addFields: {
-        PhoneNumber: { $toString: '$number' }  // Assuming `number` is directly in contacts
+        finalResponse: '$chatlog.finalResponse',
+        'UpdatedAt': '$chatlog.updatedAt',
       }
     },
     {
       $project: {
         _id: 0,
-        ITS: '$ITS',
         Name: '$name',
-        PhoneNumber: 1,
-        updatedAt: '$chatlog.updatedAt',
-        Status: '$chatlog.messageTrack',
-        Venue: '$chatlog.otherMessages.venue',
-        Response: '$chatlog.otherMessages.profile'
+        PhoneNumber: { $toString: '$number' },
+        invites: '$invites',
+        'UpdatedAt': 1,
+        Status: 1,
+        finalResponse: 1
       }
     }
   ];
 
   try {
-
     const formatDate = (date) => {
       if (!date || isNaN(new Date(date).getTime())) {
         return ''; // Return blank if date is invalid
       }
-      const options = { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit', 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        hour12: true 
+      const options = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
       };
       return new Date(date).toLocaleString('en-US', options).replace(',', '');
     };
 
     let data = await Contact.aggregate(query);
-    data = data.map(ele=>({
+
+    console.log(data)
+
+    data = data.map(ele => ({
       Name: ele.Name,
       PhoneNumber: ele.PhoneNumber,
-      ITS: ele.ITS,
-      'Updated At': formatDate(ele.updatedAt),
-      Venue: getNames('venue', ele?.Venue),
-      Status: ele.Status,
-      Response: getNames('profile', ele?.Response),
-    }))
+      invites: ele.invites,
+      'Updated At': formatDate(ele['UpdatedAt']),
+      Status: ele.finalResponse ? ele.finalResponse==='no'?'Rejected':'Accepted':'Pending',
+      finalResponse: ele.finalResponse
+    }));
 
-    const fileName = `Report-${Date.now()}.xlsx`
+    const fileName = `Report-${Date.now()}.xlsx`;
     const filePath = `uploads/reports/${fileName}`;
     const ws = xlsx.utils.json_to_sheet(data);
     const wb = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(wb, ws, 'Report');
     xlsx.writeFile(wb, filePath);
-  
-    console.log(`XLSX file created successfully at ${filePath}`);
-    
-    return filePath;
 
+    console.log(`XLSX file created successfully at ${filePath}`);
+
+    return filePath;
   } catch (error) {
     console.error(error);
+    return null;
   }
-};
+}
 
 async function createPDF(data, filePath) {
   console.log('data',data)
@@ -1475,172 +1534,8 @@ async function createPDF(data, filePath) {
   });
 }
 
-async function getReportdataByTime1(startDate, endDate, id){
 
-  let dateFilter = {};
-  if (startDate && endDate) { // If both startDate and endDate are defined, add a date range filter
-    dateFilter = {
-        "updatedAt": {
-            $gte: startDate,
-            $lt: endDate
-        }
-    };
-  }
-
-
-  let query =[
-    {$match: { instance_id:id ,...dateFilter, isValid:true } },
-    {$lookup : {
-      from: 'contacts',
-      localField: 'requestedITS',
-      foreignField: 'ITS',
-      as: 'contact'
-    }},
-    {$lookup : {
-      from: 'instances',
-      localField: 'instance_id',
-      foreignField: 'instance_id',
-      as: 'instance'
-    }},
-    {$unwind:{
-      path: '$instance',
-      preserveNullAndEmptyArrays: true
-    }},
-    {$unwind:{
-      path: '$contact',
-      preserveNullAndEmptyArrays: true
-    }},
-    {
-      $addFields: {
-        PhoneNumber: { $toString: "$contact.number" }, // Convert to string
-      }
-    },
-    {
-      $project: {
-        _id: 0,
-        Name: '$contact.name',
-        PhoneNumber: 1,
-        ITS: '$requestedITS',
-        Time: '$updatedAt',
-        Venue: '$otherMessages.venue',
-        Response: '$otherMessages.profile',
-        updatedAt: { $dateToString: { format: "%d %m %Y", date: "$updatedAt" } },
-      }
-    }
-  ]
-  const data = await ChatLogs.aggregate(query);
-
-  const filePath = `./download.csv`
-
-  const csvWriter = createCsvWriter({
-    path: filePath,
-    header: [
-      { id: 'Name', title: 'Name' },
-      { id: 'PhoneNumber', title: 'PhoneNumber', stringQuote: '"' },
-      { id: 'ITS', title: 'ITS' },
-      { id: 'updatedAt', title: 'Updated At' },
-      { id: 'Location', title: 'Venue' },
-      { id: 'Response', title: 'Response' },
-    ]
-  });
-
-  await csvWriter.writeRecords(data);
-  
-  const jsonArray = await csv().fromFile(filePath);
-  const pdfFilePath = `uploads/reports/Report-${Date.now()}.pdf`;
-
-  await createPDF(jsonArray,pdfFilePath);
-  return filePath ;
-}
-
-function isTimeInRange(startTime, endTime, timezoneOffset = 0) {
-  // Get the current date/time in UTC
-  const nowUtc = new Date();
-  console.log({startTime, endTime})
-  // Convert it to the target timezone
-  const now = new Date(nowUtc.getTime() + timezoneOffset * 60 * 60 * 1000);
-
-  // Parse start and end times as Date objects
-  const start = new Date(startTime);
-  start.setUTCDate(nowUtc.getUTCDate());
-  start.setUTCMonth(nowUtc.getUTCMonth());
-  start.setUTCFullYear(nowUtc.getUTCFullYear());
-
-  const end = new Date(endTime);
-  end.setUTCDate(nowUtc.getUTCDate());
-  end.setUTCMonth(nowUtc.getUTCMonth());
-  end.setUTCFullYear(nowUtc.getUTCFullYear());
-  console.log(now,start,end)
-  // Check if the current time falls within the start and end times
-  return now >= start && now <= end;
-}
-
-async function getStats(instanceId, startDate, endDate ){
-  let dateFilter = {};
-  if (startDate && endDate) {
-    dateFilter = {
-      updatedAt: {
-        $gte: new Date(startDate),
-        $lt: new Date(endDate)
-      }
-    };
-  }
-  const totalEntries = await ChatLogs.countDocuments({
-    instance_id: instanceId,
-    ...dateFilter
-  });
-
-  const totalCompletedResponses = await ChatLogs.countDocuments({
-    instance_id: instanceId,
-    messageTrack: 'submitted',
-    ...dateFilter
-  });
-
-  const totalIncompleteResponses = await ChatLogs.countDocuments({
-    instance_id: instanceId,
-    messageTrack: { $in: ['venue', 'profile'] },
-    ...dateFilter
-  });
-
-  const contactsWithChatlogs = await Contact.aggregate([
-    {
-      $lookup: {
-        from: 'chatlogs',
-        let: { contactITS: '$ITS' },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ['$requestedITS', '$$contactITS'] },
-                  { $eq: ['$instance_id', instanceId] },
-                  ...Object.keys(dateFilter).length ? [dateFilter] : []
-                ]
-              }
-            }
-          }
-        ],
-        as: 'chatlog'
-      }
-    },
-    { $match: { 'chatlog.0': { $exists: true } } }
-  ]);
-
-  const totalContacts = await Contact.countDocuments();
-  const totalUnresponsiveContacts = totalContacts - contactsWithChatlogs.length;
-  console.log(totalEntries,
-    totalCompletedResponses,
-    totalIncompleteResponses,
-    totalUnresponsiveContacts)
-  return {
-    totalEntries,
-    totalCompletedResponses,
-    totalIncompleteResponses,
-    totalUnresponsiveContacts
-  };
-}
-
-async function getStats1(instanceId, startDate, endDate) {
+async function getStats12(instanceId, startDate, endDate) {
   let dateFilter = {};
   if (startDate && endDate) {
     dateFilter = {
@@ -1741,37 +1636,108 @@ async function getStats1(instanceId, startDate, endDate) {
   }
 }
 
-const getExtensionFromMimeType = (mimetype) => {
-  const mimeTypes = {
-    'image/jpeg': 'jpg',
-    'image/png': 'png',
-    'audio/mp4': 'mp4',
-    'application/pdf': 'pdf',
-    // Add more MIME type mappings as needed
-  };
-  return mimeTypes[mimetype] || 'dat'; // Default to 'dat' if MIME type is unknown
-};
-
-const downloadAndSaveMedia = async (jpegThumbnail, mimetype, outputDir) => {
-  try {
-
-    // Determine the file extension based on the MIME type
-    const fileExtension = mimetype.split('/').pop();
-    const filename = `${Date.now()}.${fileExtension}`;
-    const outputPath = path.join(outputDir, filename);
-    let base64Data = jpegThumbnail.replace(/^data:image\/\w+;base64,/, '');
-    // Create a write stream
-
-    base64Data = `data:image/jpeg;base64,${base64Data}`
-
-    fs.writeFileSync(outputPath, base64Data);
-
-    // Pipe the response data to the file
-    return outputPath
-  } catch (error) {
-    throw new Error(`Failed to download media: ${error.message}`);
+async function getStats1(instanceId, startDate, endDate) {
+  let dateFilter = {};
+  if (startDate && endDate) {
+    dateFilter = {
+      updatedAt: {
+        $gte: new Date(startDate),
+        $lt: new Date(endDate)
+      }
+    };
   }
-};
+
+  
+  try {
+    const [chatLogsStats, uniqueContacts, totalContacts] = await Promise.all([
+      ChatLogs.aggregate([
+        {
+          $match: {
+            instanceId: instanceId.instance_id,
+          }
+        },
+        {
+          $facet: {
+            totalEntries: [{ $count: "count" }],
+            totalYesResponses: [
+              { $match: { finalResponse: { $ne: 'no', $nin: [null, ''] } } },
+              { $count: "count" }
+            ],
+            totalNoResponses: [
+              { $match: { finalResponse: 'no' } },
+              { $count: "count" }
+            ]
+          }
+        }
+      ]).then(result => result[0]),
+
+      Contact.aggregate([
+        {
+          $group: {
+            _id: '$number',
+            uniqueContacts: { $first: '$$ROOT' }
+          }
+        },
+        {
+          $lookup: {
+            from: 'chatlogs',
+            let: { contactNumber: '$_id' },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ['$senderNumber', '$$contactNumber'] },
+                      { $eq: ['$instanceId', instanceId._id.toString()] },
+                    ].filter(Boolean) // Remove empty objects
+                  }
+                }
+              }
+            ],
+            as: 'chatlog'
+          }
+        },
+        { $match: { 'chatlog.0': { $exists: true } } }
+      ]),
+
+      Contact.aggregate([
+        {
+          $group: {
+            _id: '$number'
+          }
+        },
+        {
+          $count: 'totalContacts'
+        }
+      ]).then(result => (result[0] ? result[0].totalContacts : 0))
+    ]);
+
+    console.log({chatLogsStats, uniqueContacts, totalContacts})
+    const totalEntries = chatLogsStats.totalEntries[0] ? chatLogsStats.totalEntries[0].count : 0;
+    const totalYesResponses = chatLogsStats.totalYesResponses[0] ? chatLogsStats.totalYesResponses[0].count : 0;
+    const totalNoResponses = chatLogsStats.totalNoResponses[0] ? chatLogsStats.totalNoResponses[0].count : 0;
+    const totalUnresponsiveContacts = totalContacts - ( totalYesResponses + totalNoResponses);
+
+    console.log(
+{     totalContacts, 
+      totalEntries,
+      totalYesResponses,
+      totalNoResponses,
+      totalUnresponsiveContacts}
+    )
+
+    return {
+      totalContacts,
+      yes: totalYesResponses,
+      no: totalNoResponses,
+      balance: totalUnresponsiveContacts
+    };
+  } catch (error) {
+    console.error('Error getting stats:', error);
+    throw error; // Ensure errors are thrown to be handled by the calling function
+  }
+}
+
 
 module.exports = {
   saveContact,
