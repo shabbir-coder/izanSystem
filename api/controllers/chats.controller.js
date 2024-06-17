@@ -141,36 +141,132 @@ const getMessages = async (req, res)=>{
       }
 }
 
-const sendMessages = async (req, res)=>{
+const sendBulkMessage = async (req, res)=>{
   try {
-    const io = getIO();
 
-    const { recieverId, recieverNumber, type , text, instance_id } = req.body;
+    const { instance_id, eventId, messageTrack } = req.body;
 
     const senderId = req.user.userId
+    const instance = await Instance.findOne({_id:instance_id})
     // Save the message to the database
-    const newMessage = new Message({ senderId, instance_id,  recieverId, text, type });
-    await newMessage.save();
+    let start = new Date();
+    start.setHours(0,0,0,0);
 
-    const url = process.env.LOGIN_CB_API
-    const access_token = process.env.ACCESS_TOKEN_CB
-    const params = {
-      number: recieverNumber,
-      type,
-      message: text
-    };
+    let end = new Date();
+    end.setHours(23,59,59,999);
+    const campaign = await Event.findOne({_id: eventId})
 
-    const response = await axios.get(`${url}/send`,{params:{...params, instance_id, access_token}})
+    const contacts = await Contact.find({ eventId: eventId });
+
+    for(let contact of contacts){
+
+      const number = contact.number;
+
+      console.log('number',number)
+      const sendMessageObj={
+        number: number,
+        type: 'text',
+        instance_id: instance?.instance_id,
+      }
+
+      if(messageTrack==1){
+  
+        let reply = campaign?.invitationText
+        if(campaign?.invitationMedia){              
+          sendMessageObj.filename = campaign?.invitationMedia.split('/').pop();
+          sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.invitationMedia;
+          sendMessageObj.type = 'media';
+        }
+        const response = await sendMessageFunc({...sendMessageObj,message: reply });
+        const NewChatLog = await ChatLogs.findOneAndUpdate(
+          {
+            senderNumber: number,
+            instanceId: instance?.instance_id,
+            updatedAt: { $gte: start, $lt: end },
+            eventId : campaign._id,
+            messageTrack:  1
+          },
+          {
+            $set: {
+              updatedAt: Date.now(),
+            }
+          },
+          {
+            upsert: true, // Create if not found, update if found
+            new: true // Return the modified document rather than the original
+          }
+        )
+      }
+    }
 
     // console.log('response', response.data)
     
-    // Emit the message to all clients in the conversation room
-    io.emit(instance_id.toString() , newMessage);
-
-    return res.status(201).send(newMessage);
+    return res.status(201).send({message:'mesg sent'});
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.data });
+    return res.status(500).json({ error: error.data });
+  }
+}
+
+const sendMessages = async (req, res)=>{
+  try {
+
+    const { numbers, instance_id, eventId, messageTrack } = req.body;
+
+    const senderId = req.user.userId
+    const instance = await Instance.findOne({_id:instance_id})
+    // Save the message to the database
+    let start = new Date();
+    start.setHours(0,0,0,0);
+
+    let end = new Date();
+    end.setHours(23,59,59,999);
+    console.log('numbers', numbers)
+    const campaign = await Event.findOne({_id: eventId})
+    for(let number of numbers){
+      console.log('number',number)
+      const sendMessageObj={
+        number: number,
+        type: 'text',
+        instance_id: instance?.instance_id,
+      }
+
+      if(messageTrack==1){
+  
+        let reply = campaign?.invitationText
+        if(campaign?.invitationMedia){              
+          sendMessageObj.filename = campaign?.invitationMedia.split('/').pop();
+          sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.invitationMedia;
+          sendMessageObj.type = 'media';
+        }
+        const response = await sendMessageFunc({...sendMessageObj,message: reply });
+        const NewChatLog = await ChatLogs.findOneAndUpdate(
+          {
+            senderNumber: number,
+            instanceId: instance?.instance_id,
+            updatedAt: { $gte: start, $lt: end },
+            eventId : campaign._id,
+            messageTrack:  1
+          },
+          {
+            $set: {
+              updatedAt: Date.now(),
+            }
+          },
+          {
+            upsert: true, // Create if not found, update if found
+            new: true // Return the modified document rather than the original
+          }
+        )
+      }
+    }
+
+    // console.log('response', response.data)
+    
+    return res.status(201).send({message:'mesg sent'});
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: error.data });
   }
 }
 
@@ -803,7 +899,6 @@ const recieveMessagesV2 = async (req, res)=>{
       end.setHours(23,59,59,999);
 
       const recieverId = await Instance.findOne({instance_id: messageObject.instance_id})
-      console.log({recieverId})
 
       const newMessage = {
         recieverId : recieverId?._id,
@@ -820,8 +915,6 @@ const recieveMessagesV2 = async (req, res)=>{
         type: 'text',
         instance_id: messageObject?.instance_id,
       }
-
-      console.log('message', message)
 
       const previousChatLog = await ChatLogs.findOne(
         {
@@ -897,8 +990,6 @@ const recieveMessagesV2 = async (req, res)=>{
       }
 
       const campaign = await Event.findOne({_id: previousChatLog?.eventId})
-
-
       
       if(campaign.startingKeyword.toLowerCase() === message.toLowerCase()){
         const currentTime = moment();
@@ -1001,7 +1092,7 @@ const recieveMessagesV2 = async (req, res)=>{
       if(campaign?.verifyNumberFirst){
         const contact = await Contact.findOne({number: remoteId})
         if(previousChatLog?.messageTrack===2){
-          if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites)){
+          if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites || 5)){
             previousChatLog.messageTrack = 3;
             previousChatLog.finalResponse=message;
             // console.log('previousChatLog',previousChatLog);
@@ -1040,6 +1131,8 @@ const recieveMessagesV2 = async (req, res)=>{
       }
       
       return res.send('nothing matched')
+    }else{
+      return res.send(false)
     }
   }catch (error){
     console.log(error)
@@ -1688,5 +1781,6 @@ module.exports = {
   sendMessages,
   recieveMessagesV2,
   getReport,
-  saveContactsInBulk
+  saveContactsInBulk,
+  sendBulkMessage
 };

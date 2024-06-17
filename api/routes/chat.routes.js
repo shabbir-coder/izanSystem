@@ -33,6 +33,8 @@ router.post('/getMessages', authenticateToken, chatsController.getMessages);
 
 router.post('/sendMessage', authenticateToken, chatsController.sendMessages);
 
+router.post('/sendBulkMessage', authenticateToken, chatsController.sendBulkMessage);
+
 router.post('/recieveMessage', chatsController.recieveMessagesV2);
 
 
