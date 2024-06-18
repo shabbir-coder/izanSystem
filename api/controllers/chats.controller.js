@@ -141,7 +141,7 @@ const getMessages = async (req, res)=>{
       }
 }
 
-const sendBulkMessage = async (req, res)=>{
+const sendBulkMessage1 = async (req, res)=>{
   try {
 
     const { instance_id, eventId, messageTrack } = req.body;
@@ -208,6 +208,76 @@ const sendBulkMessage = async (req, res)=>{
     return res.status(500).json({ error: error.data });
   }
 }
+
+
+const processContact = async (contact, instance, campaign, messageTrack) => {
+  const number = contact.number;
+  const sendMessageObj = {
+    number: number,
+    type: 'text',
+    instance_id: instance?.instance_id,
+  };
+
+  if (messageTrack == 1) {
+    let reply = campaign?.invitationText;
+    if (campaign?.invitationMedia) {
+      sendMessageObj.filename = campaign?.invitationMedia.split('/').pop();
+      sendMessageObj.media_url = process.env.IMAGE_URL + campaign?.invitationMedia;
+      sendMessageObj.type = 'media';
+    }
+    const response = await sendMessageFunc({ ...sendMessageObj, message: reply });
+    const NewChatLog = await ChatLogs.findOneAndUpdate(
+      {
+        senderNumber: number,
+        instanceId: instance?.instance_id,
+        eventId: campaign._id,
+      },
+      {
+        $set: {
+          messageTrack: 1,
+          finalResponse:'',
+          updatedAt: Date.now(),
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+      }
+    );
+  }
+};
+
+const sendMessagesWithDelay = async (contacts, instance, campaign, messageTrack) => {
+  for (let i = 0; i < contacts.length; i++) {
+    await processContact(contacts[i], instance, campaign, messageTrack);
+    await new Promise(resolve => setTimeout(resolve, 7500)); // Delay of 7 seconds between each message
+  }
+};
+
+const sendBulkMessage = async (req, res) => {
+  try {
+    const { instance_id, eventId, messageTrack } = req.body;
+    const senderId = req.user.userId;
+    const instance = await Instance.findOne({ _id: instance_id });
+    const campaign = await Event.findOne({ _id: eventId });
+    const contacts = await Contact.find({ eventId: eventId });
+
+    // Run the message sending task asynchronously
+    sendMessagesWithDelay(contacts, instance, campaign, messageTrack)
+      .then(() => {
+        console.log('All messages sent');
+      })
+      .catch(error => {
+        console.error('Error sending messages:', error);
+      });
+
+    // Send an immediate response to the client
+    return res.status(201).send({ message: 'Message sending job queued' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
 
 const sendMessages = async (req, res)=>{
   try {
