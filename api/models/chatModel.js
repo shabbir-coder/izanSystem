@@ -7,6 +7,7 @@ const contactSchema = new mongoose.Schema({
   isVerified : {type: Boolean, default: false},
   lastResponse: {type: String, default:''},
   lastResponseUpdatedAt: {type: Date},
+  inviteStatus: {type: String, default:''},
   isAdmin: {type: Boolean, default: false},
   createdBy: {type: mongoose.Types.ObjectId},
   instanceId: {type: String},
@@ -17,7 +18,7 @@ const chatLogs = new mongoose.Schema({
   senderNumber: { type: String },
   isValid: {type: Boolean, default: false},
   finalResponse: {type: String},
-  otherMessages : {type: {}},
+  inviteStatus: {type: String, default: 'Pending'},
   instanceId: {type: String},
   eventId: {type: String},
   messageTrack: {type: Number , default: null},
@@ -31,9 +32,15 @@ const chatSchema = new mongoose.Schema({
   fromMe: {type: Boolean},
   recieverId: { type: mongoose.Schema.Types.ObjectId},
   instanceId: {type: String},
+  messageStatus: [{
+    status: {type: String},
+    time: {type: Date}
+  }],  
   text: { type: String},
   type: {type: String},
   mediaUrl: {type: String},
+  messageId: {type: String},
+  timeStamp: {type: String},
   // Add other message-related fields as needed
 }, { timestamps: true }
 );

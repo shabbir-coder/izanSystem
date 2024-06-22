@@ -34,7 +34,12 @@ const EventSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Types.ObjectId },
 
   createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
+  updatedAt: { type: Date, default: Date.now },
+
+  initialCode: { type: String},
+  inviteCode: { type: String},
+  acceptCode: { type: String},
+  rejectCode: { type: String},
 });
 const Event = mongoose.model('event', EventSchema);
 
