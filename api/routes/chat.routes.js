@@ -37,6 +37,7 @@ router.post('/sendBulkMessage', authenticateToken, chatsController.sendBulkMessa
 
 router.post('/recieveMessage', chatsController.recieveMessagesV2);
 
+router.post('/stats', authenticateToken, chatsController.fetchDashBoardStats);
 
 router.get('/getreport/:id', chatsController.getReport);
 

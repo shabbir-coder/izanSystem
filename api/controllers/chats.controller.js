@@ -91,8 +91,8 @@ const getContact = async(req, res)=>{
         ];
       }
       if(filter){
-        if (filter === 'pending') {
-          query.inviteStatus = { $nin: ['accepted', 'rejected'] };
+        if (filter === 'Pending') {
+          query.inviteStatus = { $nin: ['Accepted', 'Rejected'] };
         } else {
           query.inviteStatus = filter;
         }
@@ -148,21 +148,20 @@ const getMessages = async (req, res)=>{
       }
 }
 
-const processContact = async (contact, instance, campaign, messageTrack) => {
-  const number = contact.number;
+const processContact = async (number, instance, campaign, messageTrack,  message, media, mime) => {
   const sendMessageObj = {
     number: number,
     type: 'text',
     instance_id: instance?.instance_id,
-  };
+  }; 
 
-  if (messageTrack == 1) {
-    let reply = campaign?.invitationText;
-    if (campaign?.invitationMedia) {
-      sendMessageObj.filename = campaign?.invitationMedia.split('/').pop();
-      sendMessageObj.media_url = process.env.IMAGE_URL + campaign?.invitationMedia;
+    let reply = message;
+    if (media) {
+      sendMessageObj.filename = media.split('/').pop();
+      sendMessageObj.media_url = process.env.IMAGE_URL + media;
       sendMessageObj.type = 'media';
     }
+    
     const response = await sendMessageFunc({ ...sendMessageObj, message: reply });
     const NewChatLog = await ChatLogs.findOneAndUpdate(
       {
@@ -172,7 +171,7 @@ const processContact = async (contact, instance, campaign, messageTrack) => {
       },
       {
         $set: {
-          messageTrack: 1,
+          messageTrack: messageTrack,
           finalResponse:'',
           updatedAt: Date.now(),
         },
@@ -182,26 +181,41 @@ const processContact = async (contact, instance, campaign, messageTrack) => {
         new: true,
       }
     );
-  }
+  
 };
 
-const sendMessagesWithDelay = async (contacts, instance, campaign, messageTrack) => {
-  for (let i = 0; i < contacts.length; i++) {
-    await processContact(contacts[i], instance, campaign, messageTrack);
+const sendMessagesWithDelay = async (numbers, instance, campaign, messageTrack,  message, media, mime) => {
+  for (let i = 0; i < numbers.length; i++) {
+    await processContact(numbers[i], instance, campaign, messageTrack, message, media, mime);
     await new Promise(resolve => setTimeout(resolve, 7500)); // Delay of 7 seconds between each message
   }
 };
 
 const sendBulkMessage = async (req, res) => {
   try {
-    const { instance_id, eventId, messageTrack } = req.body;
+   
+    const { instance_id, eventId, message, media, mime, number, filter, messageTrack } = req.body;
     const senderId = req.user.userId;
+
+    let messageNumbers = number;
+
     const instance = await Instance.findOne({ _id: instance_id });
     const campaign = await Event.findOne({ _id: eventId });
-    const contacts = await Contact.find({ eventId: eventId });
+    if(!number?.length){
+      const contactQuery ={eventId: eventId}
+      if(filter){
+        if (filter === 'Pending') {
+          contactQuery.inviteStatus = { $nin: ['Accepted', 'Rejected'] };
+        } else {
+          contactQuery.inviteStatus = filter;
+        }
+      }
+      const contacts = await Contact.find(contactQuery);
+      messageNumbers = contacts.map(contact => contact.number);
+    }
 
     // Run the message sending task asynchronously
-    sendMessagesWithDelay(contacts, instance, campaign, messageTrack)
+    sendMessagesWithDelay(messageNumbers, instance, campaign, messageTrack, message, media, mime)
       .then(() => {
         console.log('All messages sent');
       })
@@ -220,7 +234,7 @@ const sendBulkMessage = async (req, res) => {
 const sendMessages = async (req, res)=>{
   try {
 
-    const { numbers, instance_id, eventId, messageTrack } = req.body;
+    const { numbers, instance_id, eventId, message, messageTrack } = req.body;
 
     const senderId = req.user.userId
     const instance = await Instance.findOne({_id:instance_id})
@@ -266,6 +280,9 @@ const sendMessages = async (req, res)=>{
             new: true // Return the modified document rather than the original
           }
         )
+      }else{
+        const response = await sendMessageFunc({...sendMessageObj,message });
+
       }
     }
 
@@ -332,10 +349,46 @@ const recieveMessagesV2 = async (req, res)=>{
         instance_id: messageObject?.instance_id,
       }
 
+      const tempEvent = await Event.findOne({_id: senderId.eventId})
+
+      if(message.toLowerCase()===tempEvent?.ReportKeyword && senderId?.isAdmin){
+        if(!senderId?.isAdmin){
+          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
+          return res.send(true);
+        }
+        const fileName = await getReportdataByTime(start,end, recieverId?._id, tempEvent?._id )
+        // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
+        sendMessageObj.filename = fileName.split('/').pop();
+        sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
+        sendMessageObj.type = 'media';
+        const response =  await sendMessageFunc({...sendMessageObj, message:'Download report'});
+        return res.send(true);
+      }
+      
+      if(message.toLowerCase()===tempEvent?.StatsKeyword && senderId?.isAdmin){
+        if(!senderId?.isAdmin){
+          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
+          return res.send(true);
+        }
+
+        const replyObj = await getStats1(tempEvent?._id , recieverId,'','');
+
+        let replyMessage = '*Statistics*';
+        replyMessage += '\n\n';
+        replyMessage += `\n● Total nos of Invitees *${replyObj?.totalContacts}*`;
+        replyMessage += `\n● Yes *${replyObj?.yes}*`;
+        replyMessage += `\n● No *${replyObj?.no}*`;
+        replyMessage += `\n● Balance *${replyObj?.balance}*`;
+        
+        const response = await sendMessageFunc({...sendMessageObj, message: replyMessage});
+        return res.send(true);
+      }
+
       const previousChatLog = await ChatLogs.findOne(
         {
           senderNumber: remoteId,
-          instanceId: messageObject?.instance_id
+          instanceId: messageObject?.instance_id,
+          eventId: senderId.eventId
         },
       ).sort({ updatedAt: -1 });
 
@@ -377,7 +430,7 @@ const recieveMessagesV2 = async (req, res)=>{
 
           } else if(codeType === campaign.acceptCode){
 
-            let reply = campaign?.thankYouText
+            let reply = campaign?.thankYouText+' 111'
             if(campaign?.thankYouMedia){              
               sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -422,11 +475,14 @@ const recieveMessagesV2 = async (req, res)=>{
             return res.send('not a valid code')
           }
         }
+        return res.send('nothing')
       }
 
 
       let reply;
       console.log('previousChatLog', previousChatLog)
+
+    
 
       if(!previousChatLog){
         const campaignData = await Event.find({_id: recieverId.eventId})
@@ -517,40 +573,6 @@ const recieveMessagesV2 = async (req, res)=>{
         return res.send('after change message')
       }
 
-      if(message.toLowerCase()===campaign?.ReportKeyword && senderId?.isAdmin){
-        if(!senderId?.isAdmin){
-          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
-          return res.send(true);
-        }
-        const fileName = await getReportdataByTime(start,end, recieverId?._id)
-        // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
-        sendMessageObj.filename = fileName.split('/').pop();
-        sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
-        sendMessageObj.type = 'media';
-        const response =  await sendMessageFunc({...sendMessageObj, message:'Download report'});
-        return res.send(true);
-      }
-      
-      if(message.toLowerCase()===campaign?.StatsKeyword && senderId?.isAdmin){
-        if(!senderId?.isAdmin){
-          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
-          return res.send(true);
-        }
-
-        const replyObj = await getStats1(recieverId,'','');
-
-        let replyMessage = '*Statistics*';
-        replyMessage += '\n\n';
-        replyMessage += `\n● Total nos of Invitees *${replyObj?.totalContacts}*`;
-        replyMessage += `\n● Yes *${replyObj?.yes}*`;
-        replyMessage += `\n● No *${replyObj?.no}*`;
-        replyMessage += `\n● Balance *${replyObj?.balance}*`;
-        
-        const response = await sendMessageFunc({...sendMessageObj, message: replyMessage});
-        return res.send(true);
-      }
-
-
       if(campaign.startingKeyword.toLowerCase() === message.toLowerCase()){
         const currentTime = moment();
         
@@ -612,7 +634,7 @@ const recieveMessagesV2 = async (req, res)=>{
             const response = await sendMessageFunc({...sendMessageObj,message: reply });
             return res.send('More Invites')
           }else{
-            let reply = campaign?.thankYouText
+            let reply = campaign?.thankYouText+' 112'
             if(campaign?.thankYouMedia){              
               sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -635,7 +657,7 @@ const recieveMessagesV2 = async (req, res)=>{
           return res.send('thank you send')
           }
         }else{
-          let reply = campaign?.thankYouText
+          let reply = campaign?.thankYouText+' 113'
           if(campaign?.thankYouMedia){              
             sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
             sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -682,7 +704,7 @@ const recieveMessagesV2 = async (req, res)=>{
         if(previousChatLog?.messageTrack===2){
           if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites || 5)){
             
-            let reply = campaign?.thankYouText
+            let reply = campaign?.thankYouText+' 114'
             if(campaign?.thankYouMedia){              
               sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -1075,7 +1097,7 @@ async function createPDF(data, filePath) {
 }
 
 
-async function getStats1(instanceId, startDate, endDate) {
+async function getStats1(eventId, instanceId, startDate, endDate) {
   let dateFilter = {};
   if (startDate && endDate) {
     dateFilter = {
@@ -1088,6 +1110,7 @@ async function getStats1(instanceId, startDate, endDate) {
 
   const noRegex = /\bno\b/i;
 
+  console.log('ssssssssssss',eventId, instanceId, startDate, endDate)
   
   try {
     const [chatLogsStats, uniqueContacts, totalContacts] = await Promise.all([
@@ -1095,6 +1118,7 @@ async function getStats1(instanceId, startDate, endDate) {
         {
           $match: {
             instanceId: instanceId.instance_id,
+            eventId: eventId.toString()
           }
         },
         {
@@ -1138,10 +1162,11 @@ async function getStats1(instanceId, startDate, endDate) {
             as: 'chatlog'
           }
         },
-        { $match: { 'chatlog.0': { $exists: true } } }
+        { $match: { eventId: eventId.toString(), 'chatlog.0': { $exists: true } } }
       ]),
 
       Contact.aggregate([
+        { $match : { eventId: eventId.toString()}},
         {
           $group: {
             _id: '$number'
@@ -1179,6 +1204,12 @@ async function getStats1(instanceId, startDate, endDate) {
   }
 }
 
+const fetchDashBoardStats = async(req, res)=>{
+  const {eventId, instance_id} = req.body
+  const instance = await Instance.findOne({_id:instance_id})
+  const statsBody = await getStats1(eventId, instance, '','')
+  return res.send(statsBody)
+}
 
 module.exports = {
   saveContact,
@@ -1189,5 +1220,6 @@ module.exports = {
   recieveMessagesV2,
   getReport,
   saveContactsInBulk,
-  sendBulkMessage
+  sendBulkMessage,
+  fetchDashBoardStats
 };

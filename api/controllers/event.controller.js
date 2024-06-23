@@ -64,15 +64,16 @@ exports.saveOrUpdateCampaign = async (req, res) => {
   exports.getEventById = async (req, res) => {
     try {
       const { id } = req.params;
+      console.log(id, 'here')
       const campaign = await Event.findById(id);
-  
+      
       if (!campaign) {
         return res.status(404).json({ message: 'Campaign not found' });
       }
   
-      res.status(200).json(campaign);
+      return res.status(200).json(campaign);
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: error.message });
     }
   };
   
@@ -93,18 +94,18 @@ exports.saveOrUpdateCampaign = async (req, res) => {
   // Delete Campaign
   exports.deleteEventData = async (req, res) => {
     try {
-      const { campaignId } = req.params;
+      const { eventId } = req.params;
        // Delete instances related to the campaign
-    await Instance.deleteMany({ campaignId });
+    await Instance.deleteMany({ eventId });
 
     // Delete contacts related to the campaign
-    await Contact.deleteMany({ campaignId });
+    await Contact.deleteMany({ eventId });
 
     // Delete chatsLogs related to the campaign
-    await ChatLogs.deleteMany({ campaignId });
+    await ChatLogs.deleteMany({ eventId });
 
     // Delete messages related to the campaign
-    await Message.deleteMany({ campaignId });
+    await Message.deleteMany({ eventId });
 
     const result = await Event.findByIdAndDelete(id);
   
@@ -120,14 +121,20 @@ exports.saveOrUpdateCampaign = async (req, res) => {
 
   exports.deleteChatsData = async (req, res) => {
     try {
-      const campaignId = req.params.campaignId;
+      const eventId = req.params.eventId;
   
       // Delete chats related to the campaign
-      await ChatLogs.deleteMany({ campaignId });
+      await ChatLogs.deleteMany({ eventId });
 
       // Delete messages related to the campaign
-      await Message.deleteMany({ campaignId });
+      await Message.deleteMany({ eventId });
   
+      await Contact.updateMany(
+        { eventId: eventId },
+        {
+          $set: { lastResponse: "", inviteStatus: "" }
+        }
+      );
   
       res.status(200).json({ message: 'Chats for the campaign deleted successfully' });
     } catch (error) {
@@ -137,20 +144,20 @@ exports.saveOrUpdateCampaign = async (req, res) => {
 
   exports.deleteContactsData = async (req, res) => {
     try {
-      const campaignId = req.params.campaignId;
+      const eventId = req.params.eventId;
   
       // Find the contact to get the campaignId
-      const result = await Contact.deleteMany({ campaignId });
+      const result = await Contact.deleteMany({ eventId });
       
       if (!result) {
         return res.status(404).json({ message: 'Contacts not found' });
       }
 
       // Delete chatsLogs related to the campaign
-      await ChatLogs.deleteMany({ campaignId });
+      await ChatLogs.deleteMany({ eventId });
   
       // Delete messages related to the campaign
-      await Message.deleteMany({ campaignId });
+      await Message.deleteMany({ eventId });
   
   
       res.status(200).json({ message: 'Contact and related chats deleted successfully' });
@@ -200,3 +207,5 @@ exports.saveOrUpdateCampaign = async (req, res) => {
     }
     return res.status(200).json(files);
   }
+
+  
