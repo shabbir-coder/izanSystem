@@ -78,9 +78,9 @@ const saveContactsInBulk = async(req, res) => {
 const getContact = async(req, res)=>{
     try {
       let query = {};
-      const { page, limit, searchtext, campaignId, filter} = req.query;
-      if (campaignId) {
-        query.campaignId = campaignId;
+      const { page, limit, searchtext, eventId, filter} = req.query;
+      if (campaigeventIdnId) {
+        query.eventId = eventId;
       }
       
       if (searchtext) {
@@ -325,7 +325,7 @@ const recieveMessagesV2 = async (req, res)=>{
       console.log('remoteId', remoteId)
 
       const recieverId = await Instance.findOne({instance_id: messageObject.instance_id})
-      const senderId = await Contact.findOne({number: remoteId})
+      const senderId = await Contact.findOne({number: remoteId, instanceId: recieverId?._id })
 
       if(!senderId) return res.send('No contacts in db');
 
@@ -333,6 +333,7 @@ const recieveMessagesV2 = async (req, res)=>{
         recieverId : recieverId?._id,
         senderNumber: remoteId,
         instanceId: messageObject?.instance_id,
+        eventId: recieverId?._id,
         fromMe: fromMe,
         text: message,
         type: 'text',
@@ -430,7 +431,7 @@ const recieveMessagesV2 = async (req, res)=>{
 
           } else if(codeType === campaign.acceptCode){
 
-            let reply = campaign?.thankYouText+' 111'
+            let reply = campaign?.thankYouText
             if(campaign?.thankYouMedia){              
               sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -626,7 +627,8 @@ const recieveMessagesV2 = async (req, res)=>{
         await previousChatLog.save()
         if(campaign?.verifyNumberFirst){
           const contact = await Contact.findOne({
-            number: remoteId
+            number: remoteId,
+            eventId: campaign?._id
           })
           console.log({contact})
           if(contact.invites!='1'){
@@ -634,7 +636,7 @@ const recieveMessagesV2 = async (req, res)=>{
             const response = await sendMessageFunc({...sendMessageObj,message: reply });
             return res.send('More Invites')
           }else{
-            let reply = campaign?.thankYouText+' 112'
+            let reply = campaign?.thankYouText
             if(campaign?.thankYouMedia){              
               sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -657,7 +659,7 @@ const recieveMessagesV2 = async (req, res)=>{
           return res.send('thank you send')
           }
         }else{
-          let reply = campaign?.thankYouText+' 113'
+          let reply = campaign?.thankYouText
           if(campaign?.thankYouMedia){              
             sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
             sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -704,7 +706,7 @@ const recieveMessagesV2 = async (req, res)=>{
         if(previousChatLog?.messageTrack===2){
           if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites || 5)){
             
-            let reply = campaign?.thankYouText+' 114'
+            let reply = campaign?.thankYouText
             if(campaign?.thankYouMedia){              
               sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
@@ -787,12 +789,12 @@ const recieveMessagesV2 = async (req, res)=>{
 
 const sendMessageFunc = async (message, data={})=>{
   console.log(message)
-  // const chatLog = await ChatLogs.findOne({
-  //   senderNumber: message.number,
-  //   instanceId: message.instance_id
-  // }).sort({ updatedAt: -1 })
+  const chatLog = await ChatLogs.findOne({
+    senderNumber: message.number,
+    instanceId: message.instance_id
+  }).sort({ updatedAt: -1 })
   
-  const contact = await Contact.findOne({number: message.number});
+  const contact = await Contact.findOne({number: message.number, eventId: chatLog?.eventId});
 
   message.message = reformText(message?.message, {contact})
   
