@@ -79,7 +79,7 @@ const getContact = async(req, res)=>{
     try {
       let query = {};
       const { page, limit, searchtext, eventId, filter} = req.query;
-      if (campaigeventIdnId) {
+      if (eventId) {
         query.eventId = eventId;
       }
       
