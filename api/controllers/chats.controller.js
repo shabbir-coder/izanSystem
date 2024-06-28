@@ -127,7 +127,7 @@ const updateContacts = async(req, res)=>{
 
 const getMessages = async (req, res)=>{
     try {
-        const {senderNumber, instanceId} = req.body;
+        const {senderNumber, instanceId, limit = 20, offset = 0 } = req.body;
         
         const instance = await Instance.findOne({_id:instanceId})
 
@@ -139,9 +139,15 @@ const getMessages = async (req, res)=>{
         const messages = await Message.find({ 
           senderNumber: ''+ senderNumber,
           instanceId: instance.instance_id     
-         }).sort({ createdAt: 1 });
+         }).sort({ createdAt: -1 })
+         .skip(offset * limit)
+         .limit(limit);
 
-        res.status(200).send(messages);
+         const count = await Message.countDocuments({
+          senderNumber: ''+ senderNumber,
+          instanceId: instance.instance_id 
+         })
+        res.status(200).send({messages,count});
       } catch (error) {
         // console.log(error)
         return res.status(500).send({ error: error.message });
@@ -281,6 +287,22 @@ const sendMessages = async (req, res)=>{
           }
         )
       }else{
+        const NewChatLog = await ChatLogs.findOneAndUpdate(
+          {
+            senderNumber: number,
+            instanceId: instance?.instance_id,
+            eventId : campaign._id,
+          },
+          {
+            $set: {
+              updatedAt: Date.now(),
+            }
+          },
+          {
+            upsert: true, // Create if not found, update if found
+            new: true // Return the modified document rather than the original
+          }
+        )
         const response = await sendMessageFunc({...sendMessageObj,message });
 
       }
@@ -328,7 +350,10 @@ const recieveMessagesV2 = async (req, res)=>{
       const senderId = await Contact.findOne({number: remoteId, instanceId: recieverId?._id })
 
       if(!senderId) return res.send('No contacts in db');
-
+      const currentTime = new Date();
+      currentTime.setHours(currentTime.getHours() + 2);
+      const updatedTimeISO = currentTime.toISOString();
+	  
       const newMessage = {
         recieverId : recieverId?._id,
         senderNumber: remoteId,
@@ -338,9 +363,9 @@ const recieveMessagesV2 = async (req, res)=>{
         text: message,
         type: 'text',
         messageId,
-        timeStamp
+        timeStamp: updatedTimeISO
       }
-      console.log('newMessage', newMessage)
+	    console.log(updatedTimeISO)
       const savedMessage = new Message(newMessage);
       await savedMessage.save();
 
@@ -392,11 +417,12 @@ const recieveMessagesV2 = async (req, res)=>{
           eventId: senderId.eventId
         },
       ).sort({ updatedAt: -1 });
-
+      console.log('previousChatLog',previousChatLog)
       if(fromMe) {
         console.log('here')
         const campaign = await Event.findOne({_id: previousChatLog?.eventId})
         const code = message.split('/') 
+        console.log('campaign', campaign)
         if(code[0].toLowerCase() === campaign.initialCode.toLowerCase()){
           const codeType = code[1].toLowerCase()
           if(codeType === campaign.inviteCode){
@@ -789,13 +815,11 @@ const recieveMessagesV2 = async (req, res)=>{
 
 const sendMessageFunc = async (message, data={})=>{
   console.log(message)
-  const chatLog = await ChatLogs.findOne({
-    senderNumber: message.number,
-    instanceId: message.instance_id
+  const instance = await Instance.findOne({
+    instance_id: message.instance_id
   }).sort({ updatedAt: -1 })
-  
-  const contact = await Contact.findOne({number: message.number, eventId: chatLog?.eventId});
 
+  const contact = await Contact.findOne({number: message.number, instanceId: instance?._id.toString()});
   message.message = reformText(message?.message, {contact})
   
   const url = process.env.LOGIN_CB_API
@@ -816,7 +840,7 @@ const sendMessageFunc = async (message, data={})=>{
   // console.log('aaaa',newMessage)
 
   const response = await axios.get(`${url}/send`,{params:{...message,access_token}})
-  console.log(response)
+  // console.log(response)
   return true;
 }
 
