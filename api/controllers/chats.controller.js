@@ -328,7 +328,10 @@ const recieveMessagesV2 = async (req, res)=>{
       const senderId = await Contact.findOne({number: remoteId, instanceId: recieverId?._id })
 
       if(!senderId) return res.send('No contacts in db');
-
+	  const currentTime = new Date();
+	  currentTime.setHours(currentTime.getHours() + 2);
+	  const updatedTimeISO = currentTime.toISOString();
+	  
       const newMessage = {
         recieverId : recieverId?._id,
         senderNumber: remoteId,
@@ -338,9 +341,9 @@ const recieveMessagesV2 = async (req, res)=>{
         text: message,
         type: 'text',
         messageId,
-        timeStamp
+        timeStamp: updatedTimeISO
       }
-      console.log('newMessage', newMessage)
+	 console.log(updatedTimeISO)
       const savedMessage = new Message(newMessage);
       await savedMessage.save();
 
@@ -442,6 +445,9 @@ const recieveMessagesV2 = async (req, res)=>{
             previousChatLog.finalResponse = message;
             previousChatLog.inviteStatus = 'Accepted';
             previousChatLog.updatedAt= Date.now();
+
+			console.log('senderId',senderId)
+
 
             senderId.lastResponse = message;
             senderId.lastResponseUpdatedAt= Date.now();
