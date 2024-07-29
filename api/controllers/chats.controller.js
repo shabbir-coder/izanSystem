@@ -1077,7 +1077,7 @@ async function getReportdataByTime(startDate, endDate, id, rejectregex) {
       PhoneNumber: ele.PhoneNumber,
       invites: ele.invites,
       'Updated At': formatDate(ele['UpdatedAt']),
-      Status: ele.finalResponse ? rejectregex.test(ele.inviteStatus) ?'Rejected':'Accepted':'Pending',
+      Status: ele.finalResponse ? rejectregex.test(ele.finalResponse) ?'Rejected':'Accepted':'Pending',
       finalResponse: ele.finalResponse
     }));
 
