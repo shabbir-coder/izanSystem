@@ -16,10 +16,12 @@ const EventSchema = new mongoose.Schema({
   invitationMedia: { type: String },
   invitationMediaMime: { type: String },
 
+  acceptanceKeyword: { type: String},
   thankYouText: { type: String },
   thankYouMedia: { type: String },
   thankYouMediaMime: { type: String },
 
+  RejectionKeyword: { type: String},
   messageForRejection: { type: String },
 
   messageForMoreThanOneInvites: { type: String, required: true },

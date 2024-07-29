@@ -358,7 +358,7 @@ const recieveMessagesV2 = async (req, res)=>{
         recieverId : recieverId?._id,
         senderNumber: remoteId,
         instanceId: messageObject?.instance_id,
-        eventId: recieverId?._id,
+        eventId: recieverId?.eventId,
         fromMe: fromMe,
         text: message,
         type: 'text',
@@ -382,7 +382,9 @@ const recieveMessagesV2 = async (req, res)=>{
           const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
           return res.send(true);
         }
-        const fileName = await getReportdataByTime(start,end, recieverId?._id, tempEvent?._id )
+        const rejectregex = new RegExp(`\\b${tempEvent.RejectionKeyword}\\b`, 'i');
+
+        const fileName = await getReportdataByTime(start,end, recieverId?._id, tempEvent?._id ,rejectregex)
         // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
         sendMessageObj.filename = fileName.split('/').pop();
         sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
@@ -397,7 +399,9 @@ const recieveMessagesV2 = async (req, res)=>{
           return res.send(true);
         }
 
-        const replyObj = await getStats1(tempEvent?._id , recieverId,'','');
+        const rejectregex = new RegExp(`\\b${tempEvent.RejectionKeyword}\\b`, 'i');
+
+        const replyObj = await getStats1(tempEvent?._id , recieverId,'','', rejectregex);
 
         let replyMessage = '*Statistics*';
         replyMessage += '\n\n';
@@ -509,7 +513,6 @@ const recieveMessagesV2 = async (req, res)=>{
       let reply;
       console.log('previousChatLog', previousChatLog)
 
-    
 
       if(!previousChatLog){
         const campaignData = await Event.find({_id: recieverId.eventId})
@@ -643,7 +646,10 @@ const recieveMessagesV2 = async (req, res)=>{
       }
       
       console.log({campaign})
-      if(/\byes\b/i.test(message.trim())){
+
+      const acceptregex = new RegExp(`\\b${campaign.acceptanceKeyword}\\b`, 'i');
+
+      if(acceptregex.test(message.trim())){
         if( previousChatLog?.finalResponse){
           const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to edit your choice`
           const response = await sendMessageFunc({...sendMessageObj,message: reply });
@@ -702,7 +708,9 @@ const recieveMessagesV2 = async (req, res)=>{
         }
       }
 
-      if(/\bno\b/i.test(message.trim())){
+      const rejectregex = new RegExp(`\\b${campaign.RejectionKeyword}\\b`, 'i');
+
+      if(rejectregex.test(message.trim())){
         if( previousChatLog?.finalResponse){
           const reply =`Your data is already saved . Type *${campaign.RewriteKeyword}* to edit your choice`
           const response = await sendMessageFunc({...sendMessageObj,message: reply });
@@ -990,7 +998,7 @@ const formatDate = (date) => {
 };
 
 
-async function getReportdataByTime(startDate, endDate, id) {
+async function getReportdataByTime(startDate, endDate, id, rejectregex) {
   let dateFilter = {};
   if (startDate && endDate) {
     dateFilter = {
@@ -1069,7 +1077,7 @@ async function getReportdataByTime(startDate, endDate, id) {
       PhoneNumber: ele.PhoneNumber,
       invites: ele.invites,
       'Updated At': formatDate(ele['UpdatedAt']),
-      Status: ele.finalResponse ? /\bno\b/i.test(ele.finalResponse) ?'Rejected':'Accepted':'Pending',
+      Status: ele.finalResponse ? rejectregex.test(ele.inviteStatus) ?'Rejected':'Accepted':'Pending',
       finalResponse: ele.finalResponse
     }));
 
@@ -1123,7 +1131,7 @@ async function createPDF(data, filePath) {
 }
 
 
-async function getStats1(eventId, instanceId, startDate, endDate) {
+async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
   let dateFilter = {};
   if (startDate && endDate) {
     dateFilter = {
@@ -1151,11 +1159,11 @@ async function getStats1(eventId, instanceId, startDate, endDate) {
           $facet: {
             totalEntries: [{ $count: "count" }],
             totalYesResponses: [
-              { $match: { finalResponse: { $not: noRegex, $nin: [null, ''] } } },
+              { $match: { finalResponse: { $not: rejectregex, $nin: [null, ''] } } },
               { $count: "count" }
             ],
             totalNoResponses: [
-              { $match: { finalResponse: {$regex: noRegex }} },
+              { $match: { finalResponse: {$regex: rejectregex }} },
               { $count: "count" }
             ]
           }
