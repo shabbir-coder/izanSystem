@@ -1053,6 +1053,7 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
       $addFields: {
         finalResponse: '$chatlog.finalResponse',
         'UpdatedAt': '$chatlog.updatedAt',
+        Status: '$chatlog.inviteStatus'
       }
     },
     {
@@ -1173,11 +1174,11 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
           $facet: {
             totalEntries: [{ $count: "count" }],
             totalYesResponses: [
-              { $match: { finalResponse: { $not: noRegex, $nin: [null, ''] } } },
+              { $match: { inviteStatus: 'Accepted' } },
               { $count: "count" }
             ],
             totalNoResponses: [
-              { $match: { finalResponse: {$regex: noRegex }} },
+              { $match:  { inviteStatus: 'Rejected' } },
               { $count: "count" }
             ]
           }
@@ -1226,7 +1227,6 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
       ]).then(result => (result[0] ? result[0].totalContacts : 0))
     ]);
 
-    console.log({chatLogsStats, uniqueContacts, totalContacts})
     const totalEntries = chatLogsStats.totalEntries[0] ? chatLogsStats.totalEntries[0].count : 0;
     const totalYesResponses = chatLogsStats.totalYesResponses[0] ? chatLogsStats.totalYesResponses[0].count : 0;
     const totalNoResponses = chatLogsStats.totalNoResponses[0] ? chatLogsStats.totalNoResponses[0].count : 0;
@@ -1297,16 +1297,16 @@ async function getNumbers(eventId) {
 
     // Filter contacts based on the final response
     const yesContacts = uniqueContacts.filter(c => 
-      c.chatlog.some(cl => cl.finalResponse && !noRegex.test(cl.finalResponse))
-    ).map(c => c.uniqueContacts);
+      c.chatlog.some(cl => cl.inviteStatus === 'Accepted')
+    ).map(c => c._id);
 
     const noContacts = uniqueContacts.filter(c => 
-      c.chatlog.some(cl => cl.finalResponse && noRegex.test(cl.finalResponse))
-    ).map(c => c.uniqueContacts);
+      c.chatlog.some(cl => cl.inviteStatus === 'Rejected')
+    ).map(c => c._id);
 
     const unresponsiveContacts = uniqueContacts.filter(c => 
-      !c.chatlog.some(cl => cl.finalResponse)
-    ).map(c => c.uniqueContacts);
+      !c.chatlog.some(cl => cl.inviteStatus === 'Pending')
+    ).map(c => c._id);
 
     return {
       yesContacts,
