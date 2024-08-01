@@ -17,12 +17,16 @@ const path = require('path');
 
 const saveContact = async(req, res)=>{
     try {
-      const {name , invites, number, instanceId, campaignId} = req.body
+      const {name , invites, number, instanceId, eventId} = req.body
       const existingContact = await Contact.findOne({
-        $or: [
-          { name },
-          { number }
-          ]
+		  $and :[
+		  {eventId},
+		  {$or: [
+			  { name },
+			  { number }
+			  ]  
+			  }
+			]
         });
   
         if (existingContact) {
