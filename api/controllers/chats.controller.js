@@ -90,13 +90,20 @@ const getContact = async(req, res)=>{
           { number: { $regex: new RegExp(searchtext, 'i') } }
         ];
       }
-      if(filter){
-        if (filter === 'Pending') {
-          query.inviteStatus = { $nin: ['Accepted', 'Rejected'] };
-        } else {
-          query.inviteStatus = filter;
+
+      const numbers = await getNumbers(eventId)
+
+
+      if (filter) {
+        if (filter === 'Accepted') {
+          query.number = { $in: numbers.yesContacts };
+        } else if (filter === 'Rejected') {
+          query.number = { $in: numbers.noContacts };
+        } else if (filter === 'Pending') {
+          query.number = { $in: numbers.unresponsiveContacts };
         }
       }
+
       // console.log('query', query)
       const Contacts = await Contact.find(query)
         .skip((page - 1) * limit)
@@ -209,11 +216,16 @@ const sendBulkMessage = async (req, res) => {
     const campaign = await Event.findOne({ _id: eventId });
     if(!number?.length){
       const contactQuery ={eventId: eventId}
-      if(filter){
-        if (filter === 'Pending') {
-          contactQuery.inviteStatus = { $nin: ['Accepted', 'Rejected'] };
-        } else {
-          contactQuery.inviteStatus = filter;
+      const numbers = await getNumbers(eventId)
+
+
+      if (filter) {
+        if (filter === 'Accepted') {
+          query.number = { $in: numbers.yesContacts };
+        } else if (filter === 'Rejected') {
+          query.number = { $in: numbers.noContacts };
+        } else if (filter === 'Pending') {
+          query.number = { $in: numbers.unresponsiveContacts };
         }
       }
       const contacts = await Contact.find(contactQuery);
@@ -998,7 +1010,7 @@ const formatDate = (date) => {
 };
 
 
-async function getReportdataByTime(startDate, endDate, id, rejectregex) {
+async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex) {
   let dateFilter = {};
   if (startDate && endDate) {
     dateFilter = {
@@ -1143,8 +1155,6 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
   }
 
   const noRegex = /\bno\b/i;
-
-  console.log('ssssssssssss',eventId, instanceId, startDate, endDate)
   
   try {
     const [chatLogsStats, uniqueContacts, totalContacts] = await Promise.all([
@@ -1159,11 +1169,11 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
           $facet: {
             totalEntries: [{ $count: "count" }],
             totalYesResponses: [
-              { $match: { finalResponse: { $not: rejectregex, $nin: [null, ''] } } },
+              { $match: { finalResponse: { $not: noRegex, $nin: [null, ''] } } },
               { $count: "count" }
             ],
             totalNoResponses: [
-              { $match: { finalResponse: {$regex: rejectregex }} },
+              { $match: { finalResponse: {$regex: noRegex }} },
               { $count: "count" }
             ]
           }
@@ -1244,6 +1254,68 @@ const fetchDashBoardStats = async(req, res)=>{
   const statsBody = await getStats1(eventId, instance, '','')
   return res.send(statsBody)
 }
+
+
+async function getNumbers(eventId) {  
+
+  const noRegex = /\bno\b/i;
+
+  try {
+    // Fetch unique contacts with chat logs matching the criteria
+    const uniqueContacts = await Contact.aggregate([
+      {
+        $group: {
+          _id: '$number',
+          uniqueContacts: { $first: '$$ROOT' }
+        }
+      },
+      {
+        $lookup: {
+          from: 'chatlogs',
+          let: { contactNumber: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$senderNumber', '$$contactNumber'] },
+                    { $eq: ['$eventId', eventId.toString()] },
+                  ].filter(Boolean)
+                }
+              }
+            }
+          ],
+          as: 'chatlog'
+        }
+      },
+      { $match: { 'chatlog.0': { $exists: true } } }
+    ]);
+
+    // Filter contacts based on the final response
+    const yesContacts = uniqueContacts.filter(c => 
+      c.chatlog.some(cl => cl.finalResponse && !noRegex.test(cl.finalResponse))
+    ).map(c => c.uniqueContacts);
+
+    const noContacts = uniqueContacts.filter(c => 
+      c.chatlog.some(cl => cl.finalResponse && noRegex.test(cl.finalResponse))
+    ).map(c => c.uniqueContacts);
+
+    const unresponsiveContacts = uniqueContacts.filter(c => 
+      !c.chatlog.some(cl => cl.finalResponse)
+    ).map(c => c.uniqueContacts);
+
+    return {
+      yesContacts,
+      noContacts,
+      unresponsiveContacts
+    };
+  } catch (error) {
+    console.error('Error fetching contacts:', error);
+    throw error;
+  }
+}
+
+
 
 module.exports = {
   saveContact,
