@@ -107,7 +107,7 @@ exports.saveOrUpdateCampaign = async (req, res) => {
     // Delete messages related to the campaign
     await Message.deleteMany({ eventId });
 
-    const result = await Event.findByIdAndDelete(id);
+    const result = await Event.findByIdAndDelete(eventId);
   
       if (!result) {
         return res.status(404).json({ message: 'Campaign not found' });
@@ -115,6 +115,7 @@ exports.saveOrUpdateCampaign = async (req, res) => {
   
       res.status(200).json({ message: 'Campaign deleted successfully' });
     } catch (error) {
+      console.log(error)
       res.status(500).json({ error: error.message });
     }
   };
@@ -132,7 +133,7 @@ exports.saveOrUpdateCampaign = async (req, res) => {
       await Contact.updateMany(
         { eventId: eventId },
         {
-          $set: { lastResponse: "", inviteStatus: "" }
+          $set: { lastResponse: "", inviteStatus: "Pending" }
         }
       );
   

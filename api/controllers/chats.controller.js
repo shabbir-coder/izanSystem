@@ -67,6 +67,7 @@ const saveContactsInBulk = async(req, res) => {
       // Add instance_id and campaignId if available in req.body
       contact.instanceId = req.body.instanceId || null;
       contact.eventId = req.body.eventId || null;
+      contact.inviteStatus = 'Pending'
       return contact;
     });
 
@@ -95,16 +96,26 @@ const getContact = async(req, res)=>{
         ];
       }
 
-      const numbers = await getNumbers(eventId)
+      // const numbers = await getNumbers(eventId)
 
+
+      // if (filter) {
+      //   if (filter === 'Accepted') {
+      //     query.number = { $in: numbers.yesContacts };
+      //   } else if (filter === 'Rejected') {
+      //     query.number = { $in: numbers.noContacts };
+      //   } else if (filter === 'Pending') {
+      //     query.number = { $in: numbers.unresponsiveContacts };
+      //   }
+      // }
 
       if (filter) {
         if (filter === 'Accepted') {
-          query.number = { $in: numbers.yesContacts };
+          query.inviteStatus = 'Accepted';
         } else if (filter === 'Rejected') {
-          query.number = { $in: numbers.noContacts };
+          query.inviteStatus = 'Rejected';
         } else if (filter === 'Pending') {
-          query.number = { $in: numbers.unresponsiveContacts };
+          query.inviteStatus = 'Pending';
         }
       }
 
@@ -165,7 +176,7 @@ const getMessages = async (req, res)=>{
       }
 }
 
-const processContact = async (number, instance, campaign, messageTrack,  message, media, mime) => {
+const processContact = async (number, instance, campaign, messageTrack,  message, media, mime, messageType) => {
   const sendMessageObj = {
     number: number,
     type: 'text',
@@ -180,6 +191,21 @@ const processContact = async (number, instance, campaign, messageTrack,  message
     }
     
     const response = await sendMessageFunc({ ...sendMessageObj, message: reply });
+    
+    const updateContact = await Contact.findOne({number, eventId: campaign?._id })
+    console.log(updateContact)
+
+    if(messageType==='invite'){
+      updateContact.inviteStatus='Pending',
+      await updateContact.save()
+    }else if(messageType==='accept'){
+      updateContact.inviteStatus='Accepted',
+      await updateContact.save()
+    }else if(messageType==='rejection'){
+      updateContact.inviteStatus='Rejected',
+      await updateContact.save()
+    }
+
     const NewChatLog = await ChatLogs.findOneAndUpdate(
       {
         senderNumber: number,
@@ -190,6 +216,7 @@ const processContact = async (number, instance, campaign, messageTrack,  message
         $set: {
           messageTrack: messageTrack,
           finalResponse:'',
+          inviteStatus: updateContact.inviteStatus,
           updatedAt: Date.now(),
         },
       },
@@ -201,9 +228,9 @@ const processContact = async (number, instance, campaign, messageTrack,  message
   
 };
 
-const sendMessagesWithDelay = async (numbers, instance, campaign, messageTrack,  message, media, mime) => {
+const sendMessagesWithDelay = async (numbers, instance, campaign, messageTrack,  message, media, mime, messageType) => {
   for (let i = 0; i < numbers.length; i++) {
-    await processContact(numbers[i], instance, campaign, messageTrack, message, media, mime);
+    await processContact(numbers[i], instance, campaign, messageTrack, message, media, mime, messageType);
     await new Promise(resolve => setTimeout(resolve, 7500)); // Delay of 7 seconds between each message
   }
 };
@@ -211,7 +238,7 @@ const sendMessagesWithDelay = async (numbers, instance, campaign, messageTrack, 
 const sendBulkMessage = async (req, res) => {
   try {
    
-    const { instance_id, eventId, message, media, mime, number, filter, messageTrack } = req.body;
+    const { instance_id, eventId, message, media, mime, number, filter, messageTrack , messageType} = req.body;
     const senderId = req.user.userId;
 
     let messageNumbers = number;
@@ -220,24 +247,35 @@ const sendBulkMessage = async (req, res) => {
     const campaign = await Event.findOne({ _id: eventId });
     if(!number?.length){
       const contactQuery ={eventId: eventId}
-      const numbers = await getNumbers(eventId)
+      // const numbers = await getNumbers(eventId)
 
 
+      // if (filter) {
+      //   if (filter === 'Accepted') {
+      //     query.number = { $in: numbers.yesContacts };
+      //   } else if (filter === 'Rejected') {
+      //     query.number = { $in: numbers.noContacts };
+      //   } else if (filter === 'Pending') {
+      //     query.number = { $in: numbers.unresponsiveContacts };
+      //   }
+      // }
       if (filter) {
         if (filter === 'Accepted') {
-          query.number = { $in: numbers.yesContacts };
+          contactQuery.inviteStatus = 'Accepted';
         } else if (filter === 'Rejected') {
-          query.number = { $in: numbers.noContacts };
+          contactQuery.inviteStatus = 'Rejected';
         } else if (filter === 'Pending') {
-          query.number = { $in: numbers.unresponsiveContacts };
+          contactQuery.inviteStatus = 'Pending';
         }
       }
+
+      
       const contacts = await Contact.find(contactQuery);
       messageNumbers = contacts.map(contact => contact.number);
     }
 
     // Run the message sending task asynchronously
-    sendMessagesWithDelay(messageNumbers, instance, campaign, messageTrack, message, media, mime)
+    sendMessagesWithDelay(messageNumbers, instance, campaign, messageTrack, message, media, mime, messageType)
       .then(() => {
         console.log('All messages sent');
       })
@@ -256,7 +294,7 @@ const sendBulkMessage = async (req, res) => {
 const sendMessages = async (req, res)=>{
   try {
 
-    const { numbers, instance_id, eventId, message, messageTrack } = req.body;
+    const { numbers, instance_id, eventId, message, messageTrack, messageType } = req.body;
 
     const senderId = req.user.userId
     const instance = await Instance.findOne({_id:instance_id})
@@ -275,6 +313,24 @@ const sendMessages = async (req, res)=>{
         type: 'text',
         instance_id: instance?.instance_id,
       }
+
+      const updateContact = await Contact.findOne({number, eventId })
+      console.log(updateContact)
+  
+      if(messageType==='invite'){
+        updateContact.inviteStatus='Pending',
+        updateContact.updatedAt = Date.now()
+        await updateContact.save()
+      }else if(messageType==='accept'){
+        updateContact.updatedAt = Date.now()
+        updateContact.inviteStatus='Accepted',
+        await updateContact.save()
+      }else if(messageType==='rejection'){
+        updateContact.updatedAt = Date.now()
+        updateContact.inviteStatus='Rejected',
+        await updateContact.save()
+      }
+  
 
       if(messageTrack==1){
   
@@ -311,6 +367,8 @@ const sendMessages = async (req, res)=>{
           },
           {
             $set: {
+              messageTrack:  messageTrack,
+              inviteStatus : updateContact.inviteStatus,
               updatedAt: Date.now(),
             }
           },
@@ -363,13 +421,22 @@ const recieveMessagesV2 = async (req, res)=>{
       console.log('remoteId', remoteId)
 
       const recieverId = await Instance.findOne({instance_id: messageObject.instance_id})
-      const senderId = await Contact.findOne({number: remoteId, instanceId: recieverId?._id })
+      const senderId = await Contact.findOne({number: remoteId, eventId: recieverId?.eventId })
 
+      console.log(recieverId)
       if(!senderId) return res.send('No contacts in db');
       const currentTime = new Date();
       currentTime.setHours(currentTime.getHours() + 2);
       const updatedTimeISO = currentTime.toISOString();
-	  
+      
+      const previMessage = await Message.findOne({
+        senderNumber: remoteId,
+        recieverId : recieverId?._id,
+        eventId: recieverId?.eventId,
+        fromMe: false
+      }).sort({createdAt: -1})
+
+      console.log('previMessage', previMessage)
       const newMessage = {
         recieverId : recieverId?._id,
         senderNumber: remoteId,
@@ -381,7 +448,7 @@ const recieveMessagesV2 = async (req, res)=>{
         messageId,
         timeStamp: updatedTimeISO
       }
-	    console.log(updatedTimeISO)
+	    console.log('here')
       const savedMessage = new Message(newMessage);
       await savedMessage.save();
 
@@ -401,6 +468,7 @@ const recieveMessagesV2 = async (req, res)=>{
         const rejectregex = new RegExp(`\\b${tempEvent.RejectionKeyword}\\b`, 'i');
 
         const fileName = await getReportdataByTime(start,end, recieverId?._id, tempEvent?._id ,rejectregex)
+        console.log('fileName', fileName)
         // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
         sendMessageObj.filename = fileName.split('/').pop();
         sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
@@ -430,6 +498,83 @@ const recieveMessagesV2 = async (req, res)=>{
         return res.send(true);
       }
 
+      if(message.toLowerCase() === `${tempEvent.initialCode}/${tempEvent?.newContactCode}` && senderId?.isAdmin){
+        console.log('message', message)
+        let reply = 'Send new contact detail in following pattern.\nYou can copy the next message and send it again with your contact details';
+        let Newreply = 'New_Contact\n'
+        Newreply += '\nName: John Doe'
+        Newreply += '\nInvites: 1/2/3/all'
+        Newreply += '\nISD code: 91'
+        Newreply += '\nNumber: 9999999999'
+        Newreply += '\nParam1: '
+        Newreply += '\nParam2: '
+        Newreply += '\nParam3: '
+
+        const response1 = await sendMessageFunc({...sendMessageObj,message: reply });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const response2 = await sendMessageFunc({...sendMessageObj,message: Newreply });
+
+        return res.send('not a valid code')
+      }
+     
+      if (previMessage && previMessage.text.toLowerCase() === `${tempEvent.initialCode}/${tempEvent?.newContactCode}` && senderId?.isAdmin && !newMessage.fromMe) {
+        console.log('new_contact', message.split('\n')[0].toLowerCase())
+        if (message.split('\n')[0].toLowerCase() === 'new_contact') {
+          const result = {};
+          const lines = message.split('\n');
+          console.log('split', lines);
+      
+          lines.slice(2).forEach(item => {
+            let [key, value] = item.split(':').map(part => part.trim());
+            key = key.toLowerCase().replace(/ /g, ''); // Normalize key
+      
+            if (key === 'name') {
+              result.name = value || null;
+            } else if (key === 'invites') {
+              result.invites = value || null;
+            } else if (key === 'isdcode') {
+              result.isdCode = value || '';
+            } else if (key === 'number') {
+              result.number = (result.isdCode ? result.isdCode : '') + (value || '');
+            } else {
+              result[key] = value || null;
+            }
+          });
+      
+          result['createdBy'] = senderId?._id;
+          result['instanceId'] = recieverId?._id || null;
+          result['eventId'] = recieverId?.eventId;
+          result['inviteStatus'] = 'Pending';
+      
+          const { name, number } = result; // Extract name and number from result
+      
+          const existingContact = await Contact.findOne({
+            eventId: recieverId?.eventId,
+            $or: [
+              { name },
+              { number }
+            ]
+          });
+      
+          if (existingContact) {
+            let errorMessage = 'Contact already exists with the same ';
+            const errors = [];
+            if (existingContact.name === name) errors.push('name');
+            if (existingContact.number === number) errors.push('number');
+      
+            errorMessage += errors.join(' or ') + '.';
+            const response = await sendMessageFunc({...sendMessageObj,message: errorMessage });
+            return res.status(400).send({ error: errorMessage });
+          }
+      
+          const contact = new Contact(result);
+          await contact.save(); // Ensure the save operation is performed
+          const response = await sendMessageFunc({...sendMessageObj,message: 'Contact saved' });
+          return res.status(201).send('contact');
+        }
+      }
+      
+
       const previousChatLog = await ChatLogs.findOne(
         {
           senderNumber: remoteId,
@@ -440,11 +585,11 @@ const recieveMessagesV2 = async (req, res)=>{
       console.log('previousChatLog',previousChatLog)
       if(fromMe) {
         console.log('here')
-        const campaign = await Event.findOne({_id: previousChatLog?.eventId})
+        const campaign = await Event.findOne({_id: recieverId?.eventId})
         const code = message.split('/') 
-        console.log('campaign', campaign)
         if(code[0].toLowerCase() === campaign.initialCode.toLowerCase()){
           const codeType = code[1].toLowerCase()
+
           if(codeType === campaign.inviteCode){
 
             let reply = campaign?.invitationText
@@ -460,6 +605,7 @@ const recieveMessagesV2 = async (req, res)=>{
                 senderNumber: remoteId,
                 instanceId: messageObject?.instance_id,
                 eventId : campaign._id,
+                inviteStatus: 'Pending',
                 messageTrack:  1
               },
               {
@@ -518,13 +664,10 @@ const recieveMessagesV2 = async (req, res)=>{
 
             return res.send('rejectmessageSend')
 
-          }else{
-            return res.send('not a valid code')
           }
         }
         return res.send('nothing')
       }
-
 
       let reply;
       console.log('previousChatLog', previousChatLog)
@@ -698,7 +841,7 @@ const recieveMessagesV2 = async (req, res)=>{
 
             senderId.lastResponse = message;
             senderId.lastResponseUpdatedAt= Date.now();
-            senderId.inviteStatus ='Accepted';
+            senderId.inviteStatus = 'Accepted';
 
             // console.log('previousChatLog',previousChatLog);
             await senderId.save();
@@ -843,7 +986,7 @@ const sendMessageFunc = async (message, data={})=>{
     instance_id: message.instance_id
   }).sort({ updatedAt: -1 })
 
-  const contact = await Contact.findOne({number: message.number, instanceId: instance?._id.toString()});
+  const contact = await Contact.findOne({number: message.number, eventId: instance?.eventId.toString()});
   message.message = reformText(message?.message, {contact})
   
   const url = process.env.LOGIN_CB_API
@@ -855,7 +998,8 @@ const sendMessageFunc = async (message, data={})=>{
       instanceId: message?.instance_id,
       fromMe: true,
       text: message?.message,
-      media_url: message?.media_url
+      media_url: message?.media_url,
+      eventId: instance?.eventId
     }
     const savedMessage = new Message(newMessage);
     await savedMessage.save();
@@ -1028,7 +1172,7 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
   console.log('instance', id)
   let query = [
     {
-      $match: { instanceId: id.toString() }
+      $match: { eventId: eventId.toString(), }
     },
     {
       $lookup: {
@@ -1043,7 +1187,8 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
                 ]
               }
             }
-          }
+          },
+          
         ],
         as: 'chatlog'
       }
@@ -1051,9 +1196,7 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
     { $unwind: { path: '$chatlog', preserveNullAndEmptyArrays: true } },
     {
       $addFields: {
-        finalResponse: '$chatlog.finalResponse',
-        'UpdatedAt': '$chatlog.updatedAt',
-        Status: '$chatlog.inviteStatus'
+        finalResponse: { $ifNull: ['$chatlog.finalResponse', ''] },
       }
     },
     {
@@ -1062,8 +1205,9 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
         Name: '$name',
         PhoneNumber: { $toString: '$number' },
         invites: '$invites',
-        'UpdatedAt': 1,
-        Status: 1,
+        'UpdatedAt': { $ifNull: [{ $dateToString: { format: '%Y-%m-%d %H:%M:%S', date: '$updatedAt' } }, ''] },
+
+        Status: '$inviteStatus',
         finalResponse: 1
       }
     }
@@ -1091,11 +1235,11 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
 
     data = data.map(ele => ({
       Name: ele.Name,
-      PhoneNumber: ele.PhoneNumber,
-      invites: ele.invites,
+      'Phone Number': ele.PhoneNumber,
+      Invites: ele.invites,
       'Updated At': formatDate(ele['UpdatedAt']),
-      Status: ele.finalResponse ? rejectregex.test(ele.finalResponse) ?'Rejected':'Accepted':'Pending',
-      finalResponse: ele.finalResponse
+      Status: ele.Status,
+      'Last Response': ele.finalResponse
     }));
 
     const fileName = `Report-${Date.now()}.xlsx`;
@@ -1148,25 +1292,125 @@ async function createPDF(data, filePath) {
 }
 
 
-async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
-  let dateFilter = {};
+// async function getStats2(eventId, instanceId, startDate, endDate, rejectregex) {
+//   let dateFilter = {};
+//   if (startDate && endDate) {
+//     dateFilter = {
+//       updatedAt: {
+//         $gte: new Date(startDate),
+//         $lt: new Date(endDate)
+//       }
+//     };
+//   }
+
+//   const noRegex = /\bno\b/i;
+  
+//   try {
+//     const [chatLogsStats, uniqueContacts, totalContacts] = await Promise.all([
+//       ChatLogs.aggregate([
+//         {
+//           $match: {
+//             instanceId: instanceId.instance_id,
+//             eventId: eventId.toString()
+//           }
+//         },
+//         {
+//           $facet: {
+//             totalEntries: [{ $count: "count" }],
+//             totalYesResponses: [
+//               { $match: { inviteStatus: 'Accepted' } },
+//               { $count: "count" }
+//             ],
+//             totalNoResponses: [
+//               { $match:  { inviteStatus: 'Rejected' } },
+//               { $count: "count" }
+//             ]
+//           }
+//         }
+//       ]).then(result => result[0]),
+
+//       Contact.aggregate([
+//         {
+//           $group: {
+//             _id: '$number',
+//             uniqueContacts: { $first: '$$ROOT' }
+//           }
+//         },
+//         {
+//           $lookup: {
+//             from: 'chatlogs',
+//             let: { contactNumber: '$_id' },
+//             pipeline: [
+//               {
+//                 $match: {
+//                   $expr: {
+//                     $and: [
+//                       { $eq: ['$senderNumber', '$$contactNumber'] },
+//                       { $eq: ['$instanceId', instanceId._id.toString()] },
+//                     ].filter(Boolean) // Remove empty objects
+//                   }
+//                 }
+//               }
+//             ],
+//             as: 'chatlog'
+//           }
+//         },
+//         { $match: { eventId: eventId.toString(), 'chatlog.0': { $exists: true } } }
+//       ]),
+
+//       Contact.aggregate([
+//         { $match : { eventId: eventId.toString()}},
+//         {
+//           $group: {
+//             _id: '$number'
+//           }
+//         },
+//         {
+//           $count: 'totalContacts'
+//         }
+//       ]).then(result => (result[0] ? result[0].totalContacts : 0))
+//     ]);
+
+//     const totalEntries = chatLogsStats.totalEntries[0] ? chatLogsStats.totalEntries[0].count : 0;
+//     const totalYesResponses = chatLogsStats.totalYesResponses[0] ? chatLogsStats.totalYesResponses[0].count : 0;
+//     const totalNoResponses = chatLogsStats.totalNoResponses[0] ? chatLogsStats.totalNoResponses[0].count : 0;
+//     const totalUnresponsiveContacts = totalContacts - ( totalYesResponses + totalNoResponses);
+
+//     console.log(
+// {     totalContacts, 
+//       totalEntries,
+//       totalYesResponses,
+//       totalNoResponses,
+//       totalUnresponsiveContacts}
+//     )
+
+//     return {
+//       totalContacts,
+//       yes: totalYesResponses,
+//       no: totalNoResponses,
+//       balance: totalUnresponsiveContacts
+//     };
+//   } catch (error) {
+//     console.error('Error getting stats:', error);
+//     throw error; // Ensure errors are thrown to be handled by the calling function
+//   }
+// }
+
+async function getStats1(eventId, startDate, endDate) {
   if (startDate && endDate) {
     dateFilter = {
-      updatedAt: {
+      createdAt: {
         $gte: new Date(startDate),
         $lt: new Date(endDate)
       }
     };
   }
 
-  const noRegex = /\bno\b/i;
-  
   try {
-    const [chatLogsStats, uniqueContacts, totalContacts] = await Promise.all([
-      ChatLogs.aggregate([
+    const [stats, totalContacts] = await Promise.all([
+      Contact.aggregate([
         {
           $match: {
-            instanceId: instanceId.instance_id,
             eventId: eventId.toString()
           }
         },
@@ -1178,7 +1422,11 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
               { $count: "count" }
             ],
             totalNoResponses: [
-              { $match:  { inviteStatus: 'Rejected' } },
+              { $match: { inviteStatus: 'Rejected' } },
+              { $count: "count" }
+            ],
+            totalPendingResponses: [
+              { $match: { inviteStatus: 'Pending' } },
               { $count: "count" }
             ]
           }
@@ -1187,38 +1435,8 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
 
       Contact.aggregate([
         {
-          $group: {
-            _id: '$number',
-            uniqueContacts: { $first: '$$ROOT' }
-          }
-        },
-        {
-          $lookup: {
-            from: 'chatlogs',
-            let: { contactNumber: '$_id' },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $and: [
-                      { $eq: ['$senderNumber', '$$contactNumber'] },
-                      { $eq: ['$instanceId', instanceId._id.toString()] },
-                    ].filter(Boolean) // Remove empty objects
-                  }
-                }
-              }
-            ],
-            as: 'chatlog'
-          }
-        },
-        { $match: { eventId: eventId.toString(), 'chatlog.0': { $exists: true } } }
-      ]),
-
-      Contact.aggregate([
-        { $match : { eventId: eventId.toString()}},
-        {
-          $group: {
-            _id: '$number'
+          $match: {
+            eventId: eventId.toString(),
           }
         },
         {
@@ -1227,30 +1445,23 @@ async function getStats1(eventId, instanceId, startDate, endDate, rejectregex) {
       ]).then(result => (result[0] ? result[0].totalContacts : 0))
     ]);
 
-    const totalEntries = chatLogsStats.totalEntries[0] ? chatLogsStats.totalEntries[0].count : 0;
-    const totalYesResponses = chatLogsStats.totalYesResponses[0] ? chatLogsStats.totalYesResponses[0].count : 0;
-    const totalNoResponses = chatLogsStats.totalNoResponses[0] ? chatLogsStats.totalNoResponses[0].count : 0;
-    const totalUnresponsiveContacts = totalContacts - ( totalYesResponses + totalNoResponses);
-
-    console.log(
-{     totalContacts, 
-      totalEntries,
-      totalYesResponses,
-      totalNoResponses,
-      totalUnresponsiveContacts}
-    )
+    console.log('stats', stats, totalContacts)
+    const totalYesResponses = stats.totalYesResponses[0] ? stats.totalYesResponses[0].count : 0;
+    const totalNoResponses = stats.totalNoResponses[0] ? stats.totalNoResponses[0].count : 0;
+    const totalPendingResponses = stats.totalPendingResponses[0] ? stats.totalPendingResponses[0].count : 0;
 
     return {
       totalContacts,
       yes: totalYesResponses,
       no: totalNoResponses,
-      balance: totalUnresponsiveContacts
+      balance: totalPendingResponses
     };
   } catch (error) {
     console.error('Error getting stats:', error);
     throw error; // Ensure errors are thrown to be handled by the calling function
   }
 }
+
 
 const fetchDashBoardStats = async(req, res)=>{
   const {eventId, instance_id} = req.body

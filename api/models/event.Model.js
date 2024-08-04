@@ -42,6 +42,7 @@ const EventSchema = new mongoose.Schema({
   inviteCode: { type: String},
   acceptCode: { type: String},
   rejectCode: { type: String},
+  newContactCode: {type: String},
 });
 const Event = mongoose.model('event', EventSchema);
 
