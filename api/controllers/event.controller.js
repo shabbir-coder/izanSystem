@@ -133,7 +133,7 @@ exports.saveOrUpdateCampaign = async (req, res) => {
       await Contact.updateMany(
         { eventId: eventId },
         {
-          $set: { lastResponse: "", inviteStatus: "Pending" }
+          $set: { lastResponse: "", inviteStatus: "Pending" , attendeesCount: "0"}
         }
       );
   

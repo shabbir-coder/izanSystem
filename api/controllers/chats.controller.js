@@ -155,8 +155,8 @@ const getMessages = async (req, res)=>{
 
         const senderId = req.user.userId;
         
-        console.log(senderNumber, instance?.instance_id)
-        console.log(senderId)
+        // console.log(senderNumber, instance?.instance_id)
+        // console.log(senderId)
 
         const messages = await Message.find({ 
           senderNumber: ''+ senderNumber,
@@ -193,10 +193,11 @@ const processContact = async (number, instance, campaign, messageTrack,  message
     const response = await sendMessageFunc({ ...sendMessageObj, message: reply });
     
     const updateContact = await Contact.findOne({number, eventId: campaign?._id })
-    console.log(updateContact)
+    // console.log(updateContact)
 
     if(messageType==='invite'){
       updateContact.inviteStatus='Pending',
+      updateContact.attendeesCount='0'
       await updateContact.save()
     }else if(messageType==='accept'){
       updateContact.inviteStatus='Accepted',
@@ -315,10 +316,11 @@ const sendMessages = async (req, res)=>{
       }
 
       const updateContact = await Contact.findOne({number, eventId })
-      console.log(updateContact)
+      // console.log(updateContact)
   
       if(messageType==='invite'){
         updateContact.inviteStatus='Pending',
+        updateContact.attendeesCount='0'
         updateContact.updatedAt = Date.now()
         await updateContact.save()
       }else if(messageType==='accept'){
@@ -327,6 +329,7 @@ const sendMessages = async (req, res)=>{
         await updateContact.save()
       }else if(messageType==='rejection'){
         updateContact.updatedAt = Date.now()
+        updateContact.attendeesCount = '0'
         updateContact.inviteStatus='Rejected',
         await updateContact.save()
       }
@@ -395,7 +398,7 @@ const sendMessages = async (req, res)=>{
 const recieveMessagesV2 = async (req, res)=>{
   try{
     const messageObject = req.body;
-    console.log(req.body?.data?.event)
+    // console.log(req.body?.data?.event)
     // if(messageObject.data?.data?.messages?.[0]?.key?.fromMe === true) return res.send()
     if(["messages.upsert"].includes(req.body?.data?.event)){
       let message;
@@ -417,13 +420,13 @@ const recieveMessagesV2 = async (req, res)=>{
       end.setHours(23,59,59,999);
 
 
-      console.log('message', messageObject.data.data.messages?.[0]?.message)
-      console.log('remoteId', remoteId)
+      // console.log('message', messageObject.data.data.messages?.[0]?.message)
+      // console.log('remoteId', remoteId)
 
       const recieverId = await Instance.findOne({instance_id: messageObject.instance_id})
       const senderId = await Contact.findOne({number: remoteId, eventId: recieverId?.eventId })
 
-      console.log(recieverId)
+      // console.log(recieverId)
       if(!senderId) return res.send('No contacts in db');
       const currentTime = new Date();
       currentTime.setHours(currentTime.getHours() + 2);
@@ -436,7 +439,7 @@ const recieveMessagesV2 = async (req, res)=>{
         fromMe: false
       }).sort({createdAt: -1})
 
-      console.log('previMessage', previMessage)
+      // console.log('previMessage', previMessage)
       const newMessage = {
         recieverId : recieverId?._id,
         senderNumber: remoteId,
@@ -468,12 +471,29 @@ const recieveMessagesV2 = async (req, res)=>{
         const rejectregex = new RegExp(`\\b${tempEvent.RejectionKeyword}\\b`, 'i');
 
         const fileName = await getReportdataByTime(start,end, recieverId?._id, tempEvent?._id ,rejectregex)
-        console.log('fileName', fileName)
+        // console.log('fileName', fileName)
         // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
         sendMessageObj.filename = fileName.split('/').pop();
         sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
         sendMessageObj.type = 'media';
         const response =  await sendMessageFunc({...sendMessageObj, message:'Download report'});
+        return res.send(true);
+      }
+
+      if(message.toLowerCase()==='report dump' && senderId?.isAdmin){
+        if(!senderId?.isAdmin){
+          const response =  await sendMessageFunc({...sendMessageObj, message: 'Invalid Input' });
+          return res.send(true);
+        }
+        const rejectregex = new RegExp(`\\b${tempEvent.RejectionKeyword}\\b`, 'i');
+
+        const fileName = await getFullReport(start,end, recieverId?._id, tempEvent?._id ,rejectregex)
+        // console.log('fileName', fileName)
+        // const fileName = 'http://5.189.156.200:84/uploads/reports/Report-1716394369435.csv'
+        sendMessageObj.filename = fileName.split('/').pop();
+        sendMessageObj.media_url= process.env.IMAGE_URL+fileName;
+        sendMessageObj.type = 'media';
+        const response =  await sendMessageFunc({...sendMessageObj, message:'Download report dump'});
         return res.send(true);
       }
       
@@ -491,6 +511,7 @@ const recieveMessagesV2 = async (req, res)=>{
         replyMessage += '\n\n';
         replyMessage += `\n● Total nos of Invitees *${replyObj?.totalContacts}*`;
         replyMessage += `\n● Yes *${replyObj?.yes}*`;
+        replyMessage += `\n● Guests Count *${replyObj?.guestCount}*`;
         replyMessage += `\n● No *${replyObj?.no}*`;
         replyMessage += `\n● Balance *${replyObj?.balance}*`;
         
@@ -499,7 +520,7 @@ const recieveMessagesV2 = async (req, res)=>{
       }
 
       if(message.toLowerCase() === `${tempEvent.initialCode}/${tempEvent?.newContactCode}` && senderId?.isAdmin){
-        console.log('message', message)
+        // console.log('message', message)
         let reply = 'Send new contact detail in following pattern.\nYou can copy the next message and send it again with your contact details';
         let Newreply = 'New_Contact\n'
         Newreply += '\nName: John Doe'
@@ -518,11 +539,11 @@ const recieveMessagesV2 = async (req, res)=>{
       }
      
       if (previMessage && previMessage.text.toLowerCase() === `${tempEvent.initialCode}/${tempEvent?.newContactCode}` && senderId?.isAdmin && !newMessage.fromMe) {
-        console.log('new_contact', message.split('\n')[0].toLowerCase())
+        // console.log('new_contact', message.split('\n')[0].toLowerCase())
         if (message.split('\n')[0].toLowerCase() === 'new_contact') {
           const result = {};
           const lines = message.split('\n');
-          console.log('split', lines);
+          // console.log('split', lines);
       
           lines.slice(2).forEach(item => {
             let [key, value] = item.split(':').map(part => part.trim());
@@ -582,9 +603,8 @@ const recieveMessagesV2 = async (req, res)=>{
           eventId: senderId.eventId
         },
       ).sort({ updatedAt: -1 });
-      console.log('previousChatLog',previousChatLog)
+      // console.log('previousChatLog',previousChatLog)
       if(fromMe) {
-        console.log('here')
         const campaign = await Event.findOne({_id: recieverId?.eventId})
         const code = message.split('/') 
         if(code[0].toLowerCase() === campaign.initialCode.toLowerCase()){
@@ -598,6 +618,12 @@ const recieveMessagesV2 = async (req, res)=>{
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.invitationMedia;
               sendMessageObj.type = 'media';
             }
+            senderId.lastResponse = '';
+            senderId.lastResponseUpdatedAt= Date.now();
+            senderId.attendeesCount = '0';
+            senderId.inviteStatus ='Pending';
+            await senderId.save()
+
             const response = await sendMessageFunc({...sendMessageObj,message: reply });
 
             const NewChatLog = await ChatLogs.findOneAndUpdate(
@@ -629,15 +655,31 @@ const recieveMessagesV2 = async (req, res)=>{
               sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
               sendMessageObj.type = 'media';
             }
+
+            if(senderId.invites!='1'){
+              if(code[2]){
+                senderId.lastResponse = message;
+                senderId.lastResponseUpdatedAt= Date.now();
+                senderId.attendeesCount = code[2];
+                senderId.inviteStatus ='Accepted';
+              }else if(senderId.invites==='all' && !code[2]){
+                previousChatLog.messageTrack = 2;
+                previousChatLog.save()
+                reply = campaign?.messageForMoreThanOneInvites
+                const response = await sendMessageFunc({...sendMessageObj,message: reply });
+                return res.send('More Invites')
+              }
+            }else{
+              senderId.lastResponse = message;
+              senderId.lastResponseUpdatedAt= Date.now();
+              senderId.attendeesCount = senderId.invites;
+              senderId.inviteStatus ='Accepted';
+            }
             
             previousChatLog.messageTrack = 3;
             previousChatLog.finalResponse = message;
             previousChatLog.inviteStatus = 'Accepted';
             previousChatLog.updatedAt= Date.now();
-
-            senderId.lastResponse = message;
-            senderId.lastResponseUpdatedAt= Date.now();
-            senderId.inviteStatus ='Accepted';
 
             // console.log('previousChatLog',previousChatLog);
             await senderId.save();
@@ -648,14 +690,23 @@ const recieveMessagesV2 = async (req, res)=>{
           } else if(codeType === campaign.rejectCode){
             previousChatLog['messageTrack']=3;
             previousChatLog['finalResponse']=message.toLowerCase();
-            previousChatLog.inviteStatus = 'Rejected';
             previousChatLog.updatedAt= Date.now();
 
-            if(campaign.verifyNumberFirst){
-              senderId.lastResponse = message;
-              senderId.lastResponseUpdatedAt= Date.now();
-              senderId.inviteStatus ='Rejected';
-              await senderId.save()
+            if(true){
+              if(senderId.inviteStatus==='Accepted' && code[2]<senderId.attendeesCount){
+                senderId.lastResponse = message;
+                senderId.lastResponseUpdatedAt= Date.now();
+                senderId.attendeesCount = (+senderId.attendeesCount)-(+code[2])
+                await senderId.save()
+
+              }else{
+                senderId.lastResponse = message;
+                senderId.lastResponseUpdatedAt= Date.now();
+                senderId.inviteStatus ='Rejected';
+                senderId.attendeesCount = '0'
+                await senderId.save()
+                previousChatLog.inviteStatus = 'Rejected';
+              }
             }
 
             await previousChatLog.save()
@@ -670,7 +721,7 @@ const recieveMessagesV2 = async (req, res)=>{
       }
 
       let reply;
-      console.log('previousChatLog', previousChatLog)
+      // console.log('previousChatLog', previousChatLog)
 
 
       if(!previousChatLog){
@@ -678,9 +729,9 @@ const recieveMessagesV2 = async (req, res)=>{
         console.log({campaignData})
         for (let campaign of campaignData){
           let contact;
-          if(campaign.verifyNumberFirst){
-            contact = await Contact.findOne({number: remoteId})
-            console.log({contact})
+          if(true){
+            contact = await Contact.findOne({number: remoteId, eventId: campaign?._id.toString()})
+            // console.log({contact})
             if(!contact) {
               // reply = campaign.numberVerificationFails;
               // const response = await sendMessageFunc({...sendMessageObj,message: reply });
@@ -746,10 +797,11 @@ const recieveMessagesV2 = async (req, res)=>{
         previousChatLog['finalResponse']=''
         previousChatLog['inviteStatus']='Pending'
         await previousChatLog.save()
-        if(campaign?.verifyNumberFirst){
+        if(true){
           senderId.lastResponse = '';
           senderId.lastResponseUpdatedAt= Date.now();
           senderId.inviteStatus ='Pending';
+          senderId.attendeesCount='0'
           senderId.save();
         }
         let reply = campaign?.invitationText
@@ -804,7 +856,7 @@ const recieveMessagesV2 = async (req, res)=>{
         return res.send('firstMessage sent')
       }
       
-      console.log({campaign})
+      // console.log({campaign})
 
       const acceptregex = new RegExp(`\\b${campaign.acceptanceKeyword}\\b`, 'i');
 
@@ -816,12 +868,12 @@ const recieveMessagesV2 = async (req, res)=>{
         }
         previousChatLog['messageTrack']=2;
         await previousChatLog.save()
-        if(campaign?.verifyNumberFirst){
+        if(true){
           const contact = await Contact.findOne({
             number: remoteId,
             eventId: campaign?._id
           })
-          console.log({contact})
+          // console.log({contact})
           if(contact.invites!='1'){
             reply = campaign?.messageForMoreThanOneInvites
             const response = await sendMessageFunc({...sendMessageObj,message: reply });
@@ -839,8 +891,11 @@ const recieveMessagesV2 = async (req, res)=>{
             previousChatLog.inviteStatus = 'Accepted';
             previousChatLog.updatedAt= Date.now();
 
+            console.log('senderId', senderId)
+
             senderId.lastResponse = message;
             senderId.lastResponseUpdatedAt= Date.now();
+            senderId.attendeesCount= senderId.invites === 'all'?'5': senderId.invites;
             senderId.inviteStatus = 'Accepted';
 
             // console.log('previousChatLog',previousChatLog);
@@ -881,10 +936,11 @@ const recieveMessagesV2 = async (req, res)=>{
         previousChatLog.inviteStatus = 'Rejected';
         previousChatLog.updatedAt= Date.now();
 
-        if(campaign.verifyNumberFirst){
+        if(true){
           senderId.lastResponse = message;
           senderId.lastResponseUpdatedAt= Date.now();
           senderId.inviteStatus ='Rejected';
+          senderId.attendeesCount = '0'
           await senderId.save()
         }
 
@@ -894,36 +950,46 @@ const recieveMessagesV2 = async (req, res)=>{
         return res.send('rejection send')
       }
 
-      if(campaign?.verifyNumberFirst){
-        const contact = await Contact.findOne({number: remoteId})
-        if(previousChatLog?.messageTrack===2){
-          if(message.toLowerCase()===contact.invites.toLowerCase() || (!isNaN(message) && +message < contact.invites || 5)){
-            
-            let reply = campaign?.thankYouText
-            if(campaign?.thankYouMedia){              
-              sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
-              sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
-              sendMessageObj.type = 'media';
-            }
-
-            previousChatLog.messageTrack = 3;
-            previousChatLog.finalResponse=message;
-            previousChatLog.updatedAt=Date.now();
-            previousChatLog.inviteStatus = 'Accepted';
-            // console.log('previousChatLog',previousChatLog);
-            await previousChatLog.save(); 
-    
-            senderId.lastResponse = message;
-            senderId.lastResponseUpdatedAt= Date.now();
-            senderId.inviteStatus ='Accepted';
-            await senderId.save()
-
-            const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
-            return res.send('thank you send')
-          }else{
-            const response = await sendMessageFunc({...sendMessageObj,message: 'Invalid Input' }); 
-            return res.send('Invalid Input')
+      
+      if(previousChatLog?.messageTrack===2){
+        const numbersString = extractNumberOrAll(message.toLowerCase());
+        function extractNumberOrAll(input) {
+          const numberMatch = input.match(/\d+/);
+          if (numberMatch) {
+            return numberMatch[0];
+          } else if (input.toLowerCase().includes("all")) {
+            return "all";
+          } else {
+            return null; // or any default value you want to return if neither is found
           }
+        }
+        if(numbersString==senderId.invites.toLowerCase() || (!isNaN(numbersString) && +numbersString <= senderId.invites || 11)){
+          console.log(numbersString)
+          let reply = campaign?.thankYouText
+          if(campaign?.thankYouMedia){              
+            sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
+            sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
+            sendMessageObj.type = 'media';
+          }
+
+          previousChatLog.messageTrack = 3;
+          previousChatLog.finalResponse=message;
+          previousChatLog.updatedAt=Date.now();
+          previousChatLog.inviteStatus = 'Accepted';
+          // console.log('previousChatLog',previousChatLog);
+          await previousChatLog.save(); 
+  
+          senderId.lastResponse = message;
+          senderId.lastResponseUpdatedAt= Date.now();
+          senderId.attendeesCount = numbersString==='all'?'5': numbersString;
+          senderId.inviteStatus ='Accepted';
+          await senderId.save()
+
+          const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
+          return res.send('thank you send')
+        }else{
+          const response = await sendMessageFunc({...sendMessageObj,message: 'Invalid Input' }); 
+          return res.send('Invalid Input')
         }
       }
 
@@ -952,9 +1018,7 @@ const recieveMessagesV2 = async (req, res)=>{
       for (const elem of data) {
         let messageId = elem.key?.id;
         let message = await Message.findOne({ messageId });
-        console.log('messageFound');
         if (!message) {
-          console.log('messageNotFound');
           continue;
         };
     
@@ -965,7 +1029,7 @@ const recieveMessagesV2 = async (req, res)=>{
     
         message.messageStatus.push(newStatus);
         await message.save();
-        console.log('message status Updated to '+ elem.update?.status+' for '+ message.text)
+        // console.log('message status Updated to '+ elem.update?.status+' for '+ message.text)
       }
       return res.send('status updated')
     }
@@ -1169,7 +1233,7 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
     };
   }
 
-  console.log('instance', id)
+  // console.log('instance', id)
   let query = [
     {
       $match: { eventId: eventId.toString(), }
@@ -1177,18 +1241,20 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
     {
       $lookup: {
         from: 'chatlogs',
-        let: { contactNumber: '$number' },
+        let: { contactNumber: '$number', eventId: '$eventId' },
         pipeline: [
           {
             $match: {
               $expr: {
                 $and: [
                   { $eq: ['$senderNumber', '$$contactNumber'] },
+                  { $eq: ['$eventId', '$$eventId'] }
                 ]
               }
             }
           },
-          
+          { $sort: { createdAt: -1 } }, // Sort by date in descending order
+          { $limit: 1 } // Take only the latest chatlog
         ],
         as: 'chatlog'
       }
@@ -1208,7 +1274,8 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
         'UpdatedAt': { $ifNull: [{ $dateToString: { format: '%Y-%m-%d %H:%M:%S', date: '$updatedAt' } }, ''] },
 
         Status: '$inviteStatus',
-        finalResponse: 1
+        finalResponse: 1,
+        attendeesCount: 1
       }
     }
   ];
@@ -1231,7 +1298,7 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
 
     let data = await Contact.aggregate(query);
 
-    console.log(data)
+    // console.log(data)
 
     data = data.map(ele => ({
       Name: ele.Name,
@@ -1239,7 +1306,8 @@ async function getReportdataByTime(startDate, endDate, id, eventId, rejectregex)
       Invites: ele.invites,
       'Updated At': formatDate(ele['UpdatedAt']),
       Status: ele.Status,
-      'Last Response': ele.finalResponse
+      'Last Response': ele.finalResponse,
+      'Guest Count': ele.attendeesCount
     }));
 
     const fileName = `Report-${Date.now()}.xlsx`;
@@ -1290,6 +1358,109 @@ async function createPDF(data, filePath) {
     });
   });
 }
+
+async function getFullReport(startDate, endDate, id, eventId, rejectregex) {
+  let dateFilter = {};
+  if (startDate && endDate) {
+    dateFilter = {
+      "updatedAt": {
+        $gte: new Date(startDate),
+        $lt: new Date(endDate)
+      }
+    };
+  }
+
+  // console.log('instance', id)
+  let query = [
+    {
+      $match: { eventId: eventId.toString(), }
+    },
+    {
+      $lookup: {
+        from: 'chatlogs',
+        let: { contactNumber: '$number', eventId: '$eventId' },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$senderNumber', '$$contactNumber'] },
+                  { $eq: ['$eventId', '$$eventId'] }
+                ]
+              }
+            }
+          },
+        ],
+        as: 'chatlog'
+      }
+    },
+    { $unwind: { path: '$chatlog', preserveNullAndEmptyArrays: true } },
+    {
+      $addFields: {
+        finalResponse: { $ifNull: ['$chatlog.finalResponse', ''] },
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        Name: '$name',
+        PhoneNumber: { $toString: '$number' },
+        invites: '$invites',
+        'UpdatedAt': { $ifNull: [{ $dateToString: { format: '%Y-%m-%d %H:%M:%S', date: '$updatedAt' } }, ''] },
+
+        Status: '$inviteStatus',
+        finalResponse: 1,
+        attendeesCount: 1
+      }
+    }
+  ];
+
+  try {
+    const formatDate = (date) => {
+      if (!date || isNaN(new Date(date).getTime())) {
+        return ''; // Return blank if date is invalid
+      }
+      const options = {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      };
+      return new Date(date).toLocaleString('en-US', options).replace(',', '');
+    };
+
+    let data = await Contact.aggregate(query);
+
+    // console.log(data)
+
+    data = data.map(ele => ({
+      Name: ele.Name,
+      'Phone Number': ele.PhoneNumber,
+      Invites: ele.invites,
+      'Updated At': formatDate(ele['UpdatedAt']),
+      Status: ele.Status,
+      'Last Response': ele.finalResponse,
+      'Guest Count': ele.attendeesCount
+    }));
+
+    const fileName = `Report-${Date.now()}.xlsx`;
+    const filePath = `uploads/reports/${fileName}`;
+    const ws = xlsx.utils.json_to_sheet(data);
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, 'Report');
+    xlsx.writeFile(wb, filePath);
+
+    console.log(`XLSX file created successfully at ${filePath}`);
+
+    return filePath;
+  } catch (error) {
+    console.error(error);
+    return null;
+  }
+}
+
 
 
 // async function getStats2(eventId, instanceId, startDate, endDate, rejectregex) {
@@ -1407,7 +1578,7 @@ async function getStats1(eventId, startDate, endDate) {
   }
 
   try {
-    const [stats, totalContacts] = await Promise.all([
+    const [stats, totalContacts, totalGuests] = await Promise.all([
       Contact.aggregate([
         {
           $match: {
@@ -1442,10 +1613,25 @@ async function getStats1(eventId, startDate, endDate) {
         {
           $count: 'totalContacts'
         }
-      ]).then(result => (result[0] ? result[0].totalContacts : 0))
+      ]).then(result => (result[0] ? result[0].totalContacts : 0)),
+
+      Contact.aggregate([
+        {
+          $match: {
+            eventId: eventId.toString(),
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalGuests: { $sum: { $toInt: "$attendeesCount" } }
+          }
+        }
+      ]).then(result => (result[0] ? result[0].totalGuests : 0))
+    
     ]);
 
-    console.log('stats', stats, totalContacts)
+    console.log('stats', stats, totalContacts, totalGuests)
     const totalYesResponses = stats.totalYesResponses[0] ? stats.totalYesResponses[0].count : 0;
     const totalNoResponses = stats.totalNoResponses[0] ? stats.totalNoResponses[0].count : 0;
     const totalPendingResponses = stats.totalPendingResponses[0] ? stats.totalPendingResponses[0].count : 0;
@@ -1453,6 +1639,7 @@ async function getStats1(eventId, startDate, endDate) {
     return {
       totalContacts,
       yes: totalYesResponses,
+      guestCount: totalGuests,
       no: totalNoResponses,
       balance: totalPendingResponses
     };

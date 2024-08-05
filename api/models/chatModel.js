@@ -15,6 +15,7 @@ const contactSchema = new mongoose.Schema({
   createdBy: {type: mongoose.Types.ObjectId},
   instanceId: {type: String},
   eventId: {type: String},
+  attendeesCount: {type: String, default:0},
 },{timestamps: true});
 
 const chatLogs = new mongoose.Schema({
