@@ -691,6 +691,7 @@ const recieveMessagesV2 = async (req, res)=>{
             previousChatLog['messageTrack']=3;
             previousChatLog['finalResponse']=message.toLowerCase();
             previousChatLog.updatedAt= Date.now();
+            let reply = campaign?.messageForRejection
 
             if(true){
               if(senderId.inviteStatus==='Accepted' && code[2]<senderId.attendeesCount){
@@ -698,6 +699,12 @@ const recieveMessagesV2 = async (req, res)=>{
                 senderId.lastResponseUpdatedAt= Date.now();
                 senderId.attendeesCount = (+senderId.attendeesCount)-(+code[2])
                 await senderId.save()
+                reply = campaign?.thankYouText
+                  if(campaign?.thankYouMedia){              
+                    sendMessageObj.filename = campaign?.thankYouMedia.split('/').pop();
+                    sendMessageObj.media_url= process.env.IMAGE_URL+campaign?.thankYouMedia;
+                    sendMessageObj.type = 'media';
+                  }
 
               }else{
                 senderId.lastResponse = message;
@@ -710,7 +717,6 @@ const recieveMessagesV2 = async (req, res)=>{
             }
 
             await previousChatLog.save()
-            let reply = campaign?.messageForRejection
             const response = await sendMessageFunc({...sendMessageObj,message: reply }); 
 
             return res.send('rejectmessageSend')
